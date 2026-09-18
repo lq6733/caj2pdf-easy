@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python sources
+        run: python3 -m py_compile app/*.py
+      - name: Check launch scripts
+        run: |
+          test -x caj-to-pdf
+          test -x install-desktop.sh
+          bash -n caj-to-pdf
+          bash -n install-desktop.sh

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="#1f6feb"/>
+  <rect x="28" y="24" width="52" height="68" rx="6" fill="#ffffff"/>
+  <path d="M64 24 L80 24 L80 40 Z" fill="#d8e4ff"/>
+  <text x="38" y="64" font-size="14" font-family="Noto Sans CJK SC, Noto Sans, sans-serif" font-weight="700" fill="#1f6feb">CAJ</text>
+  <path d="M86 58 L104 58 L104 52 L118 64 L104 76 L104 70 L86 70 Z" fill="#ffd166"/>
+  <rect x="78" y="82" width="28" height="22" rx="5" fill="#ffffff"/>
+  <text x="82" y="97" font-size="11" font-family="Noto Sans CJK SC, Noto Sans, sans-serif" font-weight="700" fill="#1f6feb">PDF</text>
+</svg>
