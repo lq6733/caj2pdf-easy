@@ -6,17 +6,38 @@ on:
 
 jobs:
   syntax:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12"]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
       - name: Compile Python sources
-        run: python3 -m py_compile app/*.py
-      - name: Check launch scripts
+        run: python -m py_compile app/__init__.py app/__main__.py app/main.py app/engine.py app/gui.py app/tk_gui.py app/bootstrap.py app/build_native.py app/install.py app/tools.py vendor/caj2pdf/pdfrepair.py vendor/caj2pdf/jbigdec.py vendor/caj2pdf/jbig2dec.py vendor/caj2pdf/cajparser.py
+      - name: Build native libraries
+        run: python app/build_native.py
+      - name: Check Unix launchers
+        if: runner.os != 'Windows'
         run: |
           test -x caj-to-pdf
           test -x install-desktop.sh
           bash -n caj-to-pdf
           bash -n install-desktop.sh
+          bash -n 开始转换.sh
+          bash -n 开始转换.command
+      - name: Upload native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            vendor/caj2pdf/libjbigdec*
+            vendor/caj2pdf/libjbig2codec*
+          if-no-files-found: error

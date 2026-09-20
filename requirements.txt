@@ -1,3 +1,4 @@
 pypdf>=4
 imagesize
 Pillow
+pymupdf>=1.24

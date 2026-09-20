@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import os
-import sys
 import threading
 import traceback
 from dataclasses import dataclass, field
@@ -414,58 +412,7 @@ class CajApp(Adw.Application):
         win.present()
 
 
-def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool]:
-    files: list[Path] = []
-    auto = False
-    headless = False
-    for arg in argv:
-        if arg in {"-h", "--help"}:
-            print("CAJ 转 PDF")
-            print("用法: caj-to-pdf [选项] [文件或文件夹...]")
-            print("  --auto        打开窗口后自动开始转换")
-            print("  --headless    不打开窗口，直接在终端转换")
-            print("  --version     显示版本")
-            print("  --install     安装桌面图标和右键菜单")
-            raise SystemExit(0)
-        if arg in {"-V", "--version"}:
-            from app import __version__
-            print(__version__)
-            raise SystemExit(0)
-        if arg in {"--auto", "--start"}:
-            auto = True
-        elif arg in {"--headless", "--cli"}:
-            headless = True
-        elif arg.startswith("-"):
-            continue
-        else:
-            files.append(Path(arg))
-    if headless:
-        auto = True
-    return files, auto, headless
-
-
-def run_headless(paths: list[Path]) -> int:
-    files = collect_files(paths)
-    if not files:
-        print("没有找到可以转换的 CAJ/KDH 文件。")
-        return 1
-    failed = 0
-    for src in files:
-        print(f"正在转换：{src}")
-        result = convert_file(src)
-        print(("成功" if result.ok else "失败") + f"：{result.message}")
-        if not result.ok:
-            failed += 1
-            if result.detail:
-                print(result.detail)
-    return 1 if failed else 0
-
-
-def main() -> None:
-    os.chdir(Path(__file__).resolve().parents[1])
-    files, auto, headless = parse_args(sys.argv[1:])
-    if headless:
-        sys.exit(run_headless(files))
+def run_gtk(initial_files: list[Path], auto_start: bool) -> None:
     Adw.init()
-    app = CajApp(files, auto)
+    app = CajApp(initial_files, auto_start)
     app.run([])

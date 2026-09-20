@@ -14,28 +14,37 @@
 
 from ctypes import *
 import os
+import sys
 import struct
 
-import platform
 
-def _load_lib(name_linux, name_w64, name_w32):
-    here = os.path.dirname(os.path.abspath(__file__))
-    arch = platform.architecture()
+def _candidate_names(base):
     names = []
-    if arch[1] == 'WindowsPE':
-        names.append(name_w64 if arch[0] == '64bit' else name_w32)
+    is64 = sys.maxsize > 2**32
+    if sys.platform == "win32":
+        names.append("lib%s-w64.dll" % base if is64 else "lib%s-w32.dll" % base)
+        names.append("lib%s.dll" % base)
+        names.append("%s.dll" % base)
+    elif sys.platform == "darwin":
+        names.extend(["lib%s.dylib" % base, "lib%s.so" % base])
     else:
-        names.append(name_linux)
+        names.extend(["lib%s.so" % base, "lib%s.dylib" % base])
+    return names
+
+def _load_lib(base):
+    here = os.path.dirname(os.path.abspath(__file__))
+    names = _candidate_names(base)
     searched = []
+    folders = (here, os.path.join(here, "lib"), os.path.join(here, "lib", "bin"), os.getcwd())
     for name in names:
-        for folder in (here, os.path.join(here, 'lib'), os.path.join(here, 'lib', 'bin'), os.getcwd()):
+        for folder in folders:
             path = os.path.join(folder, name)
             searched.append(path)
             if os.path.exists(path):
                 return cdll.LoadLibrary(path)
-    raise OSError('找不到解码库 %s，已尝试: %s' % (names[0], ', '.join(searched)))
+    raise OSError("找不到解码库 %s，已尝试: %s" % (names[0], ", ".join(searched)))
 
-libjbig2codec = _load_lib("libjbig2codec.so", "libjbig2codec-w64.dll", "libjbig2codec-w32.dll")
+libjbig2codec = _load_lib('jbig2codec')
 
 decode_jbig2data_c    = libjbig2codec.decode_jbig2data_c
 

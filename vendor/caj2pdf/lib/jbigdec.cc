@@ -39,6 +39,13 @@
 #include <cctype>
 #include <cstring>
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define CAJ2PDF_EXPORT __declspec(dllexport)
+#else
+#define CAJ2PDF_EXPORT
+#endif
+
+
 extern "C" {
   class JBigCodec {
   public:
@@ -78,7 +85,7 @@ void SaveJbig2AsBmp(void* in, unsigned int len, char const* outfile)
 }
 #endif
 
-void jbigDecode(char* inbuf, unsigned int size, unsigned int height,
+CAJ2PDF_EXPORT void jbigDecode(char* inbuf, unsigned int size, unsigned int height,
                 unsigned int bitwidth, unsigned int bitwidth_in_bytes /* rounded up to x4 */, char*outbuf)
 {
   JBigCodec *jbig = (JBigCodec *)calloc(0x8040, 1); // 0x8040 is linux 64-bit specific

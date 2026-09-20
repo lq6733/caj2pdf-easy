@@ -104,8 +104,8 @@ def _friendly_error(exc: BaseException) -> str:
     for needle, message in FRIENDLY_ERRORS:
         if needle.lower() in text.lower():
             return message
-    if "mutool" in text.lower():
-        return "PDF 修复步骤失败。这台电脑上的 mutool 可能无法处理这个文件。"
+    if "mutool" in text.lower() or "pymupdf" in text.lower():
+        return "PDF 修复步骤失败。这个文件生成的 PDF 可能不完整。"
     if len(text) > 160:
         text = text[:157] + "…"
     return f"转换失败：{text}"
@@ -171,7 +171,76 @@ def extract_hn_text(source: Path) -> str:
     return "\n\n".join(pages).strip()
 
 
-def write_text_pdf(text: str, dest: Path, title: str = "") -> None:
+def _wrap_by_width(line: str, size: float, max_w: float, measure) -> list[str]:
+    if not line:
+        return [""]
+    lines: list[str] = []
+    buf = ""
+    for ch in line:
+        trial = buf + ch
+        if measure(trial, size) <= max_w:
+            buf = trial
+        else:
+            if buf:
+                lines.append(buf)
+            buf = ch
+    if buf:
+        lines.append(buf)
+    return lines or [""]
+
+
+def _write_text_pdf_pymupdf(text: str, dest: Path, title: str = "") -> None:
+    import pymupdf
+
+    font = pymupdf.Font("cjk")
+    width, height = 595.0, 842.0
+    margin = 48.0
+    max_w = width - 2 * margin
+
+    def measure(s: str, size: float) -> float:
+        return font.text_length(s, fontsize=size)
+
+    items: list[tuple[str, float, float]] = []
+    if title:
+        for line in _wrap_by_width(title, 16, max_w, measure):
+            items.append((line, 16, 24))
+        items.append(("", 12, 10))
+    for para in text.split("\n"):
+        for line in _wrap_by_width(para, 12, max_w, measure):
+            items.append((line, 12, 18))
+
+    doc = pymupdf.open()
+    page = None
+    writer = None
+    y = 0.0
+
+    def new_page() -> None:
+        nonlocal page, writer, y
+        if page is not None and writer is not None:
+            writer.write_text(page)
+        page = doc.new_page(width=width, height=height)
+        writer = pymupdf.TextWriter(page.rect)
+        y = margin + 18
+
+    new_page()
+    assert page is not None and writer is not None
+    for line, size, step in items:
+        if y > height - margin:
+            new_page()
+        if line:
+            writer.append((margin, y), line, font=font, fontsize=size)
+        y += step
+    writer.write_text(page)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        doc.subset_fonts()
+    except Exception:
+        pass
+    doc.save(str(dest))
+    doc.close()
+
+
+def _write_text_pdf_cairo(text: str, dest: Path, title: str = "") -> None:
     import cairo
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -183,23 +252,9 @@ def write_text_pdf(text: str, dest: Path, title: str = "") -> None:
     ctx.select_font_face("Noto Serif CJK SC", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_source_rgb(0, 0, 0)
 
-    def wrap(line: str, size: float) -> list[str]:
+    def measure(s: str, size: float) -> float:
         ctx.set_font_size(size)
-        if not line:
-            return [""]
-        lines: list[str] = []
-        buf = ""
-        for ch in line:
-            trial = buf + ch
-            if ctx.text_extents(trial).x_advance <= max_w:
-                buf = trial
-            else:
-                if buf:
-                    lines.append(buf)
-                buf = ch
-        if buf:
-            lines.append(buf)
-        return lines or [""]
+        return ctx.text_extents(s).x_advance
 
     def draw(y: float, line: str, size: float) -> None:
         ctx.set_font_size(size)
@@ -208,7 +263,7 @@ def write_text_pdf(text: str, dest: Path, title: str = "") -> None:
 
     y = margin + 18
     if title:
-        for line in wrap(title, 16):
+        for line in _wrap_by_width(title, 16, max_w, measure):
             if y > height - margin:
                 ctx.show_page()
                 y = margin + 18
@@ -216,13 +271,31 @@ def write_text_pdf(text: str, dest: Path, title: str = "") -> None:
             y += 24
         y += 10
     for para in text.split("\n"):
-        for line in wrap(para, 12):
+        for line in _wrap_by_width(para, 12, max_w, measure):
             if y > height - margin:
                 ctx.show_page()
                 y = margin + 18
             draw(y, line, 12)
             y += 18
     surface.finish()
+
+
+def write_text_pdf(text: str, dest: Path, title: str = "") -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    errors: list[str] = []
+    try:
+        _write_text_pdf_pymupdf(text, dest, title)
+        if dest.exists() and dest.stat().st_size > 32:
+            return
+    except Exception as exc:
+        errors.append(f"pymupdf: {exc}")
+    try:
+        _write_text_pdf_cairo(text, dest, title)
+        if dest.exists() and dest.stat().st_size > 32:
+            return
+    except Exception as exc:
+        errors.append(f"cairo: {exc}")
+    raise RuntimeError("无法生成文字版 PDF：" + "; ".join(errors))
 
 
 def _try_text_pdf_fallback(source, output, format_name, exc, detail, tb) -> ConvertResult | None:

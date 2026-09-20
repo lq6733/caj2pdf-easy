@@ -1,7 +1,7 @@
 import os
 import struct
 from shutil import copy
-from subprocess import check_output, STDOUT, CalledProcessError
+from pdfrepair import repair_pdf
 from utils import fnd, fnd_all, add_outlines, fnd_rvrs, fnd_unuse_no, find_redundant_images
 
 try:
@@ -290,11 +290,11 @@ class CAJParser(object):
         with open("pdf.tmp", 'wb') as f:
             f.write(pdf_data)
 
-        # Use mutool to repair xref
+        # Repair xref (PyMuPDF, then mutool, then copy)
         try:
-            check_output(["mutool", "clean", "pdf.tmp", "pdf_toc.pdf"], stderr=STDOUT)
+            repair_pdf("pdf.tmp", "pdf_toc.pdf")
         except Exception as e:
-            print("mutool failed, fallback copy:", e)
+            print("pdf repair failed, fallback copy:", e)
             copy("pdf.tmp", "pdf_toc.pdf")
 
         # Add Outlines
@@ -648,11 +648,11 @@ class CAJParser(object):
         fp.write(output)
         fp.close()
 
-        # Use mutool to repair xref
+        # Repair xref (PyMuPDF, then mutool, then copy)
         try:
-            check_output(["mutool", "clean", dest + ".tmp", dest], stderr=STDOUT)
+            repair_pdf(dest + ".tmp", dest)
         except Exception as e:
-            print("mutool failed, fallback copy:", e)
+            print("pdf repair failed, fallback copy:", e)
             copy(dest + ".tmp", dest)
 
         os.remove(dest + ".tmp")

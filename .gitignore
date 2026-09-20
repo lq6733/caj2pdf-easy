@@ -13,3 +13,10 @@ build/
 .idea/
 .vscode/
 *.log
+*.dll
+*.dylib
+*.exp
+*.lib
+*.obj
+*.pdb
+*.ilk

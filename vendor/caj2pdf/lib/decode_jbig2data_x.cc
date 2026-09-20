@@ -24,12 +24,21 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdint.h>
+#include "os_types.h"
 #include "jbig2.h"
+
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define CAJ2PDF_EXPORT __declspec(dllexport)
+#else
+#define CAJ2PDF_EXPORT
+#endif
+
 
 int decode_jbig2data(char*, int, char*, int, int, int, int);
 
 extern "C" {
-int decode_jbig2data_c(char* inbuf, int bufsize, char* outptr, int width, int height, int width_in_padded_4bytes, int width_in_padded_bytes)
+CAJ2PDF_EXPORT int decode_jbig2data_c(char* inbuf, int bufsize, char* outptr, int width, int height, int width_in_padded_4bytes, int width_in_padded_bytes)
 {
   return decode_jbig2data(inbuf, bufsize, outptr, width, height, width_in_padded_4bytes, width_in_padded_bytes);
 }

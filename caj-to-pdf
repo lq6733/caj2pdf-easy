@@ -1,71 +1,19 @@
 #!/usr/bin/env bash
-# Launch the CAJ-to-PDF desktop app or convert files in the terminal.
+# Cross-platform-friendly Unix launcher. Windows users should use 开始转换.bat.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
-export PYTHONPATH="$ROOT"
-
-usage() {
-  cat <<'USAGE'
-CAJ 转 PDF / caj2pdf-easy
-
-用法:
-  ./caj-to-pdf                  打开图形界面
-  ./caj-to-pdf 论文.caj         打开界面并加入文件
-  ./caj-to-pdf --headless 论文.caj
-  ./caj-to-pdf --install        安装桌面图标和右键菜单
-  ./caj-to-pdf --help
-USAGE
-}
-
-need() {
-  local cmd="$1"
-  local pkg="$2"
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "缺少命令：$cmd"
-    echo "Ubuntu/Debian 可安装：$pkg"
-    echo "Fedora 可安装：python3 gcc-c++ mupdf gtk4 libadwaita python3-gobject jbig2dec"
-    echo "Arch 可安装：python gcc mupdf-tools gtk4 libadwaita python-gobject jbig2dec"
-    exit 1
-  fi
-}
-
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+chmod +x "$ROOT/caj-to-pdf" "$ROOT/install-desktop.sh" "$ROOT/开始转换.sh" "$ROOT/安装到桌面.sh" 2>/dev/null || true
 
 if [[ "${1:-}" == "--install" ]]; then
-  exec "$ROOT/install-desktop.sh"
+  exec python3 -m app --install
 fi
 
-need python3 "sudo apt install python3 python3-venv python3-gi python3-cairo gir1.2-gtk-4.0 gir1.2-adw-1"
-need g++ "sudo apt install build-essential"
-need mutool "sudo apt install mupdf-tools"
-
-if [[ ! -e /usr/lib/x86_64-linux-gnu/libjbig2dec.so.0 && ! -e /usr/lib64/libjbig2dec.so.0 ]]; then
-  if ! ldconfig -p 2>/dev/null | grep -q 'libjbig2dec\.so\.0'; then
-    echo "缺少 libjbig2dec。Ubuntu/Debian 可安装：sudo apt install libjbig2dec0"
-    exit 1
-  fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "还没有安装 Python 3。"
+  echo "Debian/Ubuntu：sudo apt install python3 python3-venv python3-pip"
+  echo "macOS：请先安装 https://www.python.org/downloads/ 或运行 xcode-select --install"
+  exit 1
 fi
 
-if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
-  python3 -m venv --system-site-packages "$ROOT/.venv"
-fi
-
-if ! "$ROOT/.venv/bin/python" -c "import pypdf, imagesize, PIL" >/dev/null 2>&1; then
-  "$ROOT/.venv/bin/pip" install -U pip
-  "$ROOT/.venv/bin/pip" install -r "$ROOT/requirements.txt"
-fi
-
-if [[ ! -f "$ROOT/vendor/caj2pdf/libjbigdec.so" || ! -f "$ROOT/vendor/caj2pdf/libjbig2codec.so" ]]; then
-  "$ROOT/.venv/bin/python" "$ROOT/app/build_native.py"
-fi
-
-if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-  exec "$ROOT/.venv/bin/python" -m app --headless "$@"
-fi
-
-exec "$ROOT/.venv/bin/python" -m app "$@"
+exec python3 -m app "$@"
