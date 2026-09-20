@@ -46,6 +46,7 @@ class ConvertResult:
     format_name: str
     message: str
     detail: str = ""
+    fallback: bool = False
 
 
 def is_supported_file(path: Path) -> bool:
@@ -320,6 +321,7 @@ def _try_text_pdf_fallback(source, output, format_name, exc, detail, tb) -> Conv
         format_name=format_name or "文字版",
         message=extra + f" 已保存为：{output.name}",
         detail="\n".join(x for x in (detail, tb) if x).strip(),
+        fallback=True,
     )
 
 

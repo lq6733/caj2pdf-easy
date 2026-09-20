@@ -93,7 +93,10 @@ chmod +x caj-to-pdf install-desktop.sh
 ```bash
 python3 -m app --headless 论文.caj
 python3 -m app --headless 某个文件夹
+python3 -m app --selftest 某个文件夹 --out /tmp/caj2pdf-selftest
 ```
+
+`--selftest` 会把 PDF 写到临时目录，不覆盖原文件旁边的 PDF。它检查：PDF 能否打开、页数是否和 CAJ 一致、页面是否空白；如果文件其实已经是 PDF，还会对照原文文字。
 
 Windows 可以用 `开始转换.bat --headless 论文.caj`。
 

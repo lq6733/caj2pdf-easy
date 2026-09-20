@@ -21,7 +21,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       - name: Compile Python sources
-        run: python -m py_compile app/__init__.py app/__main__.py app/main.py app/engine.py app/gui.py app/tk_gui.py app/bootstrap.py app/build_native.py app/install.py app/tools.py vendor/caj2pdf/pdfrepair.py vendor/caj2pdf/jbigdec.py vendor/caj2pdf/jbig2dec.py vendor/caj2pdf/cajparser.py
+        run: python -m py_compile app/__init__.py app/__main__.py app/main.py app/engine.py app/gui.py app/tk_gui.py app/bootstrap.py app/build_native.py app/install.py app/tools.py app/selftest.py vendor/caj2pdf/pdfrepair.py vendor/caj2pdf/jbigdec.py vendor/caj2pdf/jbig2dec.py vendor/caj2pdf/cajparser.py
       - name: Build native libraries
         run: python app/build_native.py
       - name: Check Unix launchers

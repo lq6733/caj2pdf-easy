@@ -10,19 +10,27 @@ from app.engine import collect_files, convert_file
 from app.tools import has_display
 
 
-def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str]:
+def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool, Path | None]:
     files: list[Path] = []
     auto = False
     headless = False
     install = False
     gui = ""
-    for arg in argv:
+    selftest = False
+    out_dir: Path | None = None
+    skip_next = False
+    for index, arg in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
         if arg in {"-h", "--help"}:
             print("CAJ 转 PDF")
             print("用法: python -m app [选项] [文件或文件夹...]")
             print("  --auto        打开窗口后自动开始转换")
             print("  --headless    不打开窗口，直接在终端转换")
             print("  --install     安装桌面快捷方式")
+            print("  --selftest    自测转换准确率（结果写到临时目录，不覆盖原 PDF）")
+            print("  --out 目录    自测输出目录")
             print("  --gui tk      使用 tkinter 界面（Windows / macOS 默认）")
             print("  --gui gtk     使用 GTK 界面（Linux 默认）")
             print("  --version     显示版本")
@@ -38,6 +46,15 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str]:
             headless = True
         elif arg in {"--install"}:
             install = True
+        elif arg in {"--selftest", "--check"}:
+            selftest = True
+        elif arg in {"--out", "--output"}:
+            if index + 1 >= len(argv):
+                raise SystemExit("请在 --out 后面写输出目录")
+            out_dir = Path(argv[index + 1])
+            skip_next = True
+        elif arg.startswith("--out="):
+            out_dir = Path(arg.split("=", 1)[1])
         elif arg in {"--gui"}:
             gui = "tk"
         elif arg.startswith("--gui="):
@@ -51,7 +68,7 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str]:
             files.append(Path(arg))
     if headless:
         auto = True
-    return files, auto, headless, install, gui
+    return files, auto, headless, install, gui, selftest, out_dir
 
 
 def run_headless(paths: list[Path]) -> int:
@@ -121,11 +138,15 @@ def main() -> None:
         normalized.append(argv[i])
         i += 1
 
-    files, auto, headless, install, gui = parse_args(normalized)
+    files, auto, headless, install, gui, selftest, out_dir = parse_args(normalized)
     if install:
         from app.install import install_shortcuts
 
         raise SystemExit(install_shortcuts())
+    if selftest:
+        from app.selftest import run_selftest
+
+        raise SystemExit(run_selftest(files, out_dir))
 
     no_display = not has_display()
     if headless or (no_display and files):
