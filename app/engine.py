@@ -41,6 +41,7 @@ FRIENDLY_ERRORS = (
 KIND_LABELS = {
     "text": "可复制文字",
     "scan": "扫描件，无法选中文字",
+    "ocr": "扫描件，已识别文字，可复制",
     "fallback": "文字版（版面已简化）",
 }
 
@@ -389,16 +390,25 @@ def convert_file(source: Path, output: Path | None = None) -> ConvertResult:
 
     kind = "text"
     try:
-        from app.scan import ensure_scan_if_unselectable
+        from app.scan import enhance_pdf, tesseract_languages
 
-        analysis, rasterized = ensure_scan_if_unselectable(output)
-        kind = analysis.kind or "text"
+        analysis, rasterized, ocr_done = enhance_pdf(output)
+        kind = "ocr" if ocr_done else (analysis.kind or "text")
+        bits: list[str] = []
+        if extra:
+            bits.append(extra.strip())
         if rasterized:
-            extra = (extra + " " if extra else "") + "已检测为无法选中文字，已自动转为扫描件。"
+            bits.append("已检测为无法选中文字，已自动转为扫描件。")
+        if ocr_done:
+            bits.append("已用 Tesseract 识别文字，可以搜索和复制（个别字可能不准）。")
         elif kind == "scan":
-            extra = (extra + " " if extra else "") + "这是扫描件，页面是图片，无法选中文字。"
+            if tesseract_languages():
+                bits.append("这是扫描件，页面是图片，无法选中文字。")
+            else:
+                bits.append("这是扫描件，无法选中文字。安装 Tesseract 中文语言包后可自动识别。")
         elif kind == "text":
-            extra = (extra + " " if extra else "") + "可以选中和复制文字。"
+            bits.append("可以选中和复制文字。")
+        extra = " ".join(bits)
     except Exception as exc:
         extra = (extra + " " if extra else "") + f"文字/扫描件检测失败：{exc}"
 

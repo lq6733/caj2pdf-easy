@@ -1,14 +1,19 @@
-"""Detect image-only PDFs and rasterize files whose text cannot be selected."""
+"""Detect scans, rasterize unselectable PDFs, and OCR them with Tesseract."""
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 SCAN_DPI = 170
+OCR_DPI = 200
 TEXT_CHARS_PER_PAGE = 25
 CJK_CHARS_PER_PAGE = 8
 GARBLED_RATIO = 0.30
+OCR_MIN_CONF = 40.0
 
 
 @dataclass
@@ -23,10 +28,13 @@ class PdfAnalysis:
     is_scan: bool = False
     already_image_pdf: bool = False
     needs_rasterize: bool = False
+    ocr_applied: bool = False
     label: str = ""
 
     @property
     def kind(self) -> str:
+        if self.ocr_applied:
+            return "ocr"
         if self.selectable:
             return "text"
         if self.is_scan or self.needs_rasterize or self.already_image_pdf:
@@ -78,13 +86,14 @@ def analyze_pdf(path: Path | str) -> PdfAnalysis:
         info.already_image_pdf = info.image_pages >= max(1, int(pages * 0.8)) and info.text_pages == 0
         has_visual = info.image_pages > 0
         if not has_visual:
-            # Cheap visual check on the first page: not a blank unicolor page.
             try:
                 pix = doc[0].get_pixmap(matrix=pymupdf.Matrix(0.15, 0.15), colorspace=pymupdf.csGRAY)
                 has_visual = not bool(pix.is_unicolor)
             except Exception:
                 has_visual = False
-        info.is_scan = (not info.selectable) and (info.already_image_pdf or (info.image_pages > 0 and info.text_pages == 0))
+        info.is_scan = (not info.selectable) and (
+            info.already_image_pdf or (info.image_pages > 0 and info.text_pages == 0)
+        )
         info.needs_rasterize = (not info.selectable) and has_visual and not info.already_image_pdf
         if info.selectable:
             info.label = "可复制文字"
@@ -125,18 +134,171 @@ def rasterize_to_scan(src: Path | str, dst: Path | str, dpi: int = SCAN_DPI) -> 
     tmp.replace(dst)
 
 
-def ensure_scan_if_unselectable(path: Path | str) -> tuple[PdfAnalysis, bool]:
-    """If the PDF has no usable selectable text, convert it to a scanned PDF.
+def tesseract_cmd() -> str | None:
+    return shutil.which("tesseract")
 
-    Returns (analysis_after, rasterized).
+
+def tesseract_languages() -> str:
+    cmd = tesseract_cmd()
+    if not cmd:
+        return ""
+    try:
+        out = subprocess.check_output([cmd, "--list-langs"], text=True, errors="ignore", stderr=subprocess.STDOUT)
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    available = {line.strip() for line in out.splitlines() if line.strip() and " " not in line}
+    parts: list[str] = []
+    if "chi_sim" in available:
+        parts.append("chi_sim")
+    if "eng" in available:
+        parts.append("eng")
+    return "+".join(parts)
+
+
+def _page_needs_ocr(text: str) -> bool:
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    return cjk < CJK_CHARS_PER_PAGE and len(text.strip()) < TEXT_CHARS_PER_PAGE
+
+
+def _tesseract_tsv(image: Path, lang: str) -> str:
+    cmd = tesseract_cmd()
+    if not cmd:
+        raise FileNotFoundError("未找到 tesseract")
+    result = subprocess.run(
+        [cmd, str(image), "stdout", "-l", lang, "--oem", "1", "--psm", "3", "tsv"],
+        capture_output=True,
+        timeout=90,
+        check=False,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise RuntimeError(err or f"tesseract 退出码 {result.returncode}")
+    return (result.stdout or b"").decode("utf-8", errors="replace")
+
+
+def _iter_ocr_words(tsv: str, page_width: float, page_height: float, pix_w: int, pix_h: int):
+    scale_x = page_width / max(pix_w, 1)
+    scale_y = page_height / max(pix_h, 1)
+    lines = tsv.splitlines()
+    if not lines:
+        return
+    for line in lines[1:]:
+        parts = line.split("\t")
+        if len(parts) < 12:
+            continue
+        try:
+            level = int(parts[0])
+            left = float(parts[6])
+            top = float(parts[7])
+            width = float(parts[8])
+            height = float(parts[9])
+            conf = float(parts[10])
+        except ValueError:
+            continue
+        text = parts[11].strip()
+        if level != 5 or conf < OCR_MIN_CONF or not text:
+            continue
+        fontsize = max(4.0, min(height * scale_y, 72.0))
+        x = left * scale_x
+        y = (top + height) * scale_y
+        if y > page_height - 1:
+            y = page_height - 1
+        yield x, y, fontsize, text
+
+
+def ocr_pdf(path: Path | str, lang: str | None = None, dpi: int = OCR_DPI) -> int:
+    """Add an invisible text layer. Returns the number of pages that received OCR."""
+    import pymupdf
+
+    path = Path(path)
+    lang = lang or tesseract_languages()
+    if not lang:
+        raise FileNotFoundError("没有可用的 Tesseract 语言包（需要 chi_sim 或 eng）")
+
+    doc = pymupdf.open(path)
+    ocr_pages = 0
+    font = pymupdf.Font("cjk")
+    zoom = max(dpi, 72) / 72.0
+    matrix = pymupdf.Matrix(zoom, zoom)
+    tmp_pdf = path.with_name(path.name + ".ocr-tmp.pdf")
+    try:
+        with tempfile.TemporaryDirectory(prefix="caj2pdf-ocr-") as tmp:
+            tmpdir = Path(tmp)
+            for index, page in enumerate(doc):
+                existing = page.get_text("text") or ""
+                if not _page_needs_ocr(existing):
+                    continue
+                pix = page.get_pixmap(matrix=matrix, alpha=False, colorspace=pymupdf.csRGB)
+                image_path = tmpdir / f"page-{index:04d}.png"
+                pix.save(image_path)
+                pix_w, pix_h = pix.width, pix.height
+                pix = None
+                try:
+                    tsv = _tesseract_tsv(image_path, lang)
+                except Exception:
+                    continue
+                words = list(_iter_ocr_words(tsv, page.rect.width, page.rect.height, pix_w, pix_h))
+                if not words:
+                    continue
+                writer = pymupdf.TextWriter(page.rect)
+                for x, y, fontsize, word in words:
+                    writer.append((x, y), word, font=font, fontsize=fontsize)
+                writer.write_text(page, render_mode=3, overlay=True)
+                ocr_pages += 1
+        if ocr_pages == 0:
+            return 0
+        try:
+            doc.subset_fonts()
+        except Exception:
+            pass
+        doc.save(str(tmp_pdf), deflate=True, garbage=4)
+    finally:
+        doc.close()
+    tmp_pdf.replace(path)
+    return ocr_pages
+
+
+def ensure_scan_if_unselectable(path: Path | str) -> tuple[PdfAnalysis, bool]:
+    analysis, rasterized, _ocr_done = enhance_pdf(path)
+    return analysis, rasterized
+
+
+def enhance_pdf(path: Path | str) -> tuple[PdfAnalysis, bool, bool]:
+    """Rasterize if needed, then OCR scans so text can be selected.
+
+    Returns (analysis, rasterized, ocr_done).
     """
     path = Path(path)
     analysis = analyze_pdf(path)
-    if not analysis.needs_rasterize:
-        return analysis, False
-    rasterize_to_scan(path, path)
-    after = analyze_pdf(path)
-    after.needs_rasterize = False
-    after.is_scan = True
-    after.label = "扫描件，无法选中文字"
-    return after, True
+    rasterized = False
+    ocr_done = False
+    if analysis.selectable:
+        return analysis, False, False
+    if analysis.needs_rasterize:
+        rasterize_to_scan(path, path)
+        rasterized = True
+        analysis = analyze_pdf(path)
+    lang = tesseract_languages()
+    if lang:
+        try:
+            ocr_pages = ocr_pdf(path, lang=lang)
+            if ocr_pages:
+                ocr_done = True
+                analysis = analyze_pdf(path)
+                analysis.ocr_applied = True
+                if analysis.selectable or analysis.cjk_chars >= 40:
+                    analysis.label = "扫描件，已识别文字，可复制"
+                else:
+                    analysis.label = "扫描件，识别到的文字较少"
+                    ocr_done = analysis.cjk_chars > 0
+            else:
+                analysis = analyze_pdf(path)
+        except Exception:
+            analysis = analyze_pdf(path)
+    if not ocr_done and (analysis.is_scan or rasterized):
+        analysis.is_scan = True
+        if lang:
+            analysis.label = "扫描件，无法选中文字"
+        else:
+            analysis.label = "扫描件，无法选中文字（安装 Tesseract 中文包后可识别）"
+    return analysis, rasterized, ocr_done

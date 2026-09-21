@@ -11,7 +11,7 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 - 转换后的 PDF 保存在原文件旁边
 - 不需要知网客户端，也不需要一直联网（第一次安装 Python 组件时需要）
 - 支持 CAJ、KDH、HN、C8，以及「后缀是 .caj、内容其实已经是 PDF」的文件
-- 自动识别扫描件（无法选中文字）。这类文件会生成图片版 PDF，并在结果里标明
+- 自动识别扫描件（无法选中文字）。已安装 Tesseract 时，会识别中文/英文并写入可复制文字层
 
 ## 你需要先有什么
 
@@ -19,9 +19,9 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 
 | 系统 | 额外说明 |
 | --- | --- |
-| Windows | 从 [python.org](https://www.python.org/downloads/windows/) 安装，**务必勾选 Add python.exe to PATH** |
-| macOS | 可用 python.org 安装包，或先运行 `xcode-select --install` |
-| Linux | 再装 GTK 界面更美观；没有 GTK 时会尝试 tkinter |
+| Windows | 从 [python.org](https://www.python.org/downloads/windows/) 安装，**务必勾选 Add python.exe to PATH**。扫描件识别需另装 [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki)，并勾选 Chinese Simplified |
+| macOS | 可用 python.org 安装包，或先运行 `xcode-select --install`。扫描件识别：`brew install tesseract tesseract-lang` |
+| Linux | 再装 GTK 界面更美观；没有 GTK 时会尝试 tkinter。扫描件识别见下面的 Tesseract 软件包 |
 
 含扫描页的 HN / C8 需要编译一个很小的解码库。程序会在第一次运行时自动编译：
 
@@ -37,19 +37,19 @@ Ubuntu / Debian：
 
 ```bash
 sudo apt install python3 python3-venv python3-pip python3-gi python3-cairo \
-  gir1.2-gtk-4.0 gir1.2-adw-1 build-essential
+  gir1.2-gtk-4.0 gir1.2-adw-1 build-essential tesseract-ocr tesseract-ocr-chi-sim
 ```
 
 Fedora：
 
 ```bash
-sudo dnf install python3 python3-pip python3-gobject gtk4 libadwaita gcc-c++
+sudo dnf install python3 python3-pip python3-gobject gtk4 libadwaita gcc-c++ tesseract tesseract-langpack-chi_sim
 ```
 
 Arch：
 
 ```bash
-sudo pacman -S python python-pip python-gobject gtk4 libadwaita gcc
+sudo pacman -S python python-pip python-gobject gtk4 libadwaita gcc tesseract tesseract-data-chi_sim
 ```
 
 ## 安装
@@ -106,7 +106,7 @@ Windows 可以用 `开始转换.bat --headless 论文.caj`。
 ## 限制
 
 - 这不是官方转换器，极少数文件会失败（尤其是几乎没有图片的纯文字 HN）
-- HN / C8 以及本身就是扫描件的文件，会转成图片版 PDF，无法选中文字（界面会标明「扫描件」）
+- HN / C8 以及本身就是扫描件的文件，会先做成图片版 PDF；若系统装了 Tesseract（`chi_sim`），会再识别文字，方便搜索和复制。识别可能有错字
 - 纯文字 HN 在抽得出足够正文时，会生成可阅读的文字版 PDF，版面和原文不同
 
 ## 致谢
