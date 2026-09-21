@@ -38,6 +38,13 @@ FRIENDLY_ERRORS = (
 )
 
 
+KIND_LABELS = {
+    "text": "可复制文字",
+    "scan": "扫描件，无法选中文字",
+    "fallback": "文字版（版面已简化）",
+}
+
+
 @dataclass
 class ConvertResult:
     source: Path
@@ -47,6 +54,7 @@ class ConvertResult:
     message: str
     detail: str = ""
     fallback: bool = False
+    kind: str = ""
 
 
 def is_supported_file(path: Path) -> bool:
@@ -322,6 +330,7 @@ def _try_text_pdf_fallback(source, output, format_name, exc, detail, tb) -> Conv
         message=extra + f" 已保存为：{output.name}",
         detail="\n".join(x for x in (detail, tb) if x).strip(),
         fallback=True,
+        kind="fallback",
     )
 
 
@@ -377,7 +386,31 @@ def convert_file(source: Path, output: Path | None = None) -> ConvertResult:
         extra = "这个文件其实已经是 PDF，已按 PDF 复制出来。"
     elif format_name.endswith("较新格式）"):
         extra = "已尝试按较新格式转换。"
+
+    kind = "text"
+    try:
+        from app.scan import ensure_scan_if_unselectable
+
+        analysis, rasterized = ensure_scan_if_unselectable(output)
+        kind = analysis.kind or "text"
+        if rasterized:
+            extra = (extra + " " if extra else "") + "已检测为无法选中文字，已自动转为扫描件。"
+        elif kind == "scan":
+            extra = (extra + " " if extra else "") + "这是扫描件，页面是图片，无法选中文字。"
+        elif kind == "text":
+            extra = (extra + " " if extra else "") + "可以选中和复制文字。"
+    except Exception as exc:
+        extra = (extra + " " if extra else "") + f"文字/扫描件检测失败：{exc}"
+
     message = f"成功，已保存为：{output.name}"
     if extra:
         message = extra + " " + message
-    return ConvertResult(source, output, True, format_name, message, log.getvalue().strip())
+    return ConvertResult(
+        source=source,
+        output=output,
+        ok=True,
+        format_name=format_name,
+        message=message,
+        detail=log.getvalue().strip(),
+        kind=kind,
+    )

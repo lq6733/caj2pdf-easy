@@ -10,7 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
 
-from app.engine import ConvertResult, collect_files, convert_file
+from app.engine import KIND_LABELS, ConvertResult, collect_files, convert_file
 from app.tools import open_path
 
 APP_TITLE = "CAJ 转 PDF"
@@ -24,6 +24,7 @@ class Job:
     message: str = ""
     output: Path | None = None
     format_name: str = ""
+    kind: str = ""
     detail: str = ""
 
 
@@ -162,8 +163,9 @@ class CajTkWindow:
             return
         for job in self.jobs:
             status = job.status
-            if job.format_name:
-                status = f"{status}  ·  {job.format_name}"
+            extras = [x for x in (job.format_name, KIND_LABELS.get(job.kind, "")) if x]
+            if extras:
+                status = f"{status}  ·  " + "  ·  ".join(extras)
             self.tree.insert("", tk.END, text=job.path.name, values=(status, job.message))
         if not self.busy:
             self.btn_convert.state(["!disabled"])
@@ -180,6 +182,7 @@ class CajTkWindow:
             job.ok = None
             job.message = ""
             job.output = None
+            job.kind = ""
             job.detail = ""
         self.refresh_list()
         threading.Thread(target=self._convert_worker, daemon=True).start()
@@ -215,6 +218,7 @@ class CajTkWindow:
         job.message = result.message
         job.output = result.output
         job.format_name = result.format_name
+        job.kind = result.kind
         job.detail = result.detail
         self.progress["value"] = index
         self.refresh_list()

@@ -14,7 +14,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
-from app.engine import ConvertResult, collect_files, convert_file
+from app.engine import KIND_LABELS, ConvertResult, collect_files, convert_file
 
 APP_ID = "io.github.caj2pdf.easy"
 APP_TITLE = "CAJ 转 PDF"
@@ -28,6 +28,7 @@ class Job:
     message: str = ""
     output: Path | None = None
     format_name: str = ""
+    kind: str = ""
     detail: str = ""
     row: Gtk.ListBoxRow | None = field(default=None, repr=False)
 
@@ -289,8 +290,9 @@ class CajWindow(Adw.ApplicationWindow):
             name.set_xalign(0)
             name.set_ellipsize(Pango.EllipsizeMode.END)
             status = job.status
-            if job.format_name:
-                status = f"{status}  ·  {job.format_name}"
+            extras = [x for x in (job.format_name, KIND_LABELS.get(job.kind, "")) if x]
+            if extras:
+                status = f"{status}  ·  " + "  ·  ".join(extras)
             sub = Gtk.Label(label=status)
             sub.set_xalign(0)
             sub.add_css_class("caption")
@@ -328,6 +330,7 @@ class CajWindow(Adw.ApplicationWindow):
             job.ok = None
             job.message = ""
             job.output = None
+            job.kind = ""
             job.detail = ""
         self.refresh_list()
         threading.Thread(target=self._convert_worker, daemon=True).start()
@@ -363,6 +366,7 @@ class CajWindow(Adw.ApplicationWindow):
         job.message = result.message
         job.output = result.output
         job.format_name = result.format_name
+        job.kind = result.kind
         job.detail = result.detail
         self.progress.set_fraction(index / total)
         self.refresh_list()
