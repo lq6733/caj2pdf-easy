@@ -56,13 +56,21 @@ class ConvertResult:
     detail: str = ""
     fallback: bool = False
     kind: str = ""
+    skipped: bool = False
 
 
 def is_supported_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
 
 
-def collect_files(paths: list[Path]) -> list[Path]:
+def is_pdf_file(path: Path) -> bool:
+    if not path.is_file() or path.suffix.lower() != ".pdf":
+        return False
+    name = path.name.lower()
+    return not (name.endswith(".ocr-tmp.pdf") or name.endswith(".scan-tmp.pdf"))
+
+
+def _collect_matching(paths: list[Path], predicate) -> list[Path]:
     found: list[Path] = []
     seen: set[Path] = set()
     for raw in paths:
@@ -75,19 +83,38 @@ def collect_files(paths: list[Path]) -> list[Path]:
             continue
         if path.is_dir():
             for child in sorted(path.rglob("*")):
-                if is_supported_file(child):
+                if predicate(child):
                     resolved = child.resolve()
                     if resolved not in seen:
                         seen.add(resolved)
                         found.append(resolved)
-        elif is_supported_file(path):
+        elif predicate(path):
             seen.add(path)
             found.append(path)
     return found
 
 
+def collect_files(paths: list[Path]) -> list[Path]:
+    return _collect_matching(paths, is_supported_file)
+
+
+def collect_pdfs(paths: list[Path]) -> list[Path]:
+    return _collect_matching(paths, is_pdf_file)
+
+
 def default_output_for(source: Path) -> Path:
     return source.with_suffix(".pdf")
+
+
+OCR_NAME_SUFFIX = "-已识别"
+
+
+def default_ocr_output_for(source: Path) -> Path:
+    source = Path(source)
+    stem = source.stem
+    if stem.endswith(OCR_NAME_SUFFIX):
+        return source
+    return source.with_name(stem + OCR_NAME_SUFFIX + ".pdf")
 
 
 def _ensure_vendor_path() -> None:
@@ -335,7 +362,7 @@ def _try_text_pdf_fallback(source, output, format_name, exc, detail, tb) -> Conv
     )
 
 
-def convert_file(source: Path, output: Path | None = None) -> ConvertResult:
+def convert_file(source: Path, output: Path | None = None, progress=None) -> ConvertResult:
     source = Path(source).expanduser().resolve()
     output = Path(output).expanduser().resolve() if output else default_output_for(source)
     if not source.exists():
@@ -392,7 +419,7 @@ def convert_file(source: Path, output: Path | None = None) -> ConvertResult:
     try:
         from app.scan import enhance_pdf, tesseract_languages
 
-        analysis, rasterized, ocr_done = enhance_pdf(output)
+        analysis, rasterized, ocr_done = enhance_pdf(output, progress=progress)
         kind = "ocr" if ocr_done else (analysis.kind or "text")
         bits: list[str] = []
         if extra:
@@ -423,4 +450,103 @@ def convert_file(source: Path, output: Path | None = None) -> ConvertResult:
         message=message,
         detail=log.getvalue().strip(),
         kind=kind,
+    )
+
+
+
+def ocr_image_pdf(source: Path, output: Path | None = None, progress=None) -> ConvertResult:
+    """OCR an existing image-only PDF. Never overwrites the original unless it is already *-已识别.pdf."""
+    source = Path(source).expanduser().resolve()
+    dest = Path(output).expanduser().resolve() if output else default_ocr_output_for(source)
+    if not source.exists():
+        return ConvertResult(source, None, False, "PDF", "找不到这个文件。可能被移动或删除了。")
+    if source.suffix.lower() != ".pdf":
+        return ConvertResult(source, None, False, "PDF", "请选择 PDF 文件。")
+
+    from app.scan import analyze_pdf, enhance_pdf, tesseract_install_message, tesseract_languages
+
+    if not tesseract_languages():
+        return ConvertResult(source, None, False, "PDF", tesseract_install_message())
+
+    try:
+        import pymupdf
+
+        doc = pymupdf.open(source)
+        try:
+            if getattr(doc, "needs_pass", False):
+                return ConvertResult(source, None, False, "PDF", "这个 PDF 有密码，没法识别。")
+            if doc.page_count <= 0:
+                return ConvertResult(source, None, False, "PDF", "这个 PDF 是空的。")
+        finally:
+            doc.close()
+        analysis = analyze_pdf(source)
+    except Exception as exc:
+        return ConvertResult(source, None, False, "PDF", f"打不开这个 PDF：{exc}")
+
+    if analysis.selectable:
+        return ConvertResult(
+            source=source,
+            output=source,
+            ok=True,
+            format_name="PDF",
+            message="这个 PDF 已经可以选中文字，不用再识别。",
+            kind="text",
+            skipped=True,
+        )
+
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest != source:
+            shutil.copy2(source, dest)
+    except OSError as exc:
+        return ConvertResult(source, None, False, "PDF", f"没法保存识别结果：{exc}")
+
+    try:
+        analysis, rasterized, ocr_done = enhance_pdf(dest, progress=progress)
+    except Exception as exc:
+        return ConvertResult(
+            source=source,
+            output=dest if dest.exists() else None,
+            ok=False,
+            format_name="PDF",
+            message=f"识别失败：{exc}",
+            detail=traceback.format_exc(),
+            kind="scan",
+        )
+
+    unchanged = dest != source
+    if ocr_done:
+        extra = "（原来的文件没有改动）" if unchanged else ""
+        return ConvertResult(
+            source=source,
+            output=dest,
+            ok=True,
+            format_name="PDF",
+            message=f"已识别文字，可以搜索和复制（个别字可能不准）。已保存为：{dest.name}{extra}",
+            kind="ocr",
+        )
+
+    if rasterized:
+        extra = "（原来的文件没有改动）" if unchanged else ""
+        return ConvertResult(
+            source=source,
+            output=dest,
+            ok=False,
+            format_name="PDF",
+            message=f"已另存为扫描件，但没能识别出文字。已保存为：{dest.name}{extra}",
+            kind="scan",
+        )
+
+    if dest != source and dest.exists():
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+    return ConvertResult(
+        source=source,
+        output=None,
+        ok=False,
+        format_name="PDF",
+        message="没能识别出文字。可能是图片不清晰，或不是中文/英文扫描件。",
+        kind="scan",
     )

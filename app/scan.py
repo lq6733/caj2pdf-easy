@@ -155,6 +155,22 @@ def tesseract_languages() -> str:
     return "+".join(parts)
 
 
+def tesseract_install_message() -> str:
+    import sys
+
+    if sys.platform == "win32":
+        extra = "Windows：安装 Tesseract（UB Mannheim 安装包），安装时勾选 Chinese Simplified。"
+    elif sys.platform == "darwin":
+        extra = "macOS：在终端运行 brew install tesseract tesseract-lang"
+    else:
+        extra = "Linux：安装 tesseract-ocr 和 tesseract-ocr-chi-sim（Debian/Ubuntu 可用 apt）。"
+    return (
+        "没有找到文字识别程序 Tesseract，所以没法识别扫描件上的字。\n"
+        f"{extra}\n"
+        "装好后重新打开本工具即可。"
+    )
+
+
 def _page_needs_ocr(text: str) -> bool:
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
     return cjk < CJK_CHARS_PER_PAGE and len(text.strip()) < TEXT_CHARS_PER_PAGE
@@ -206,7 +222,7 @@ def _iter_ocr_words(tsv: str, page_width: float, page_height: float, pix_w: int,
         yield x, y, fontsize, text
 
 
-def ocr_pdf(path: Path | str, lang: str | None = None, dpi: int = OCR_DPI) -> int:
+def ocr_pdf(path: Path | str, lang: str | None = None, dpi: int = OCR_DPI, progress=None) -> int:
     """Add an invisible text layer. Returns the number of pages that received OCR."""
     import pymupdf
 
@@ -224,7 +240,13 @@ def ocr_pdf(path: Path | str, lang: str | None = None, dpi: int = OCR_DPI) -> in
     try:
         with tempfile.TemporaryDirectory(prefix="caj2pdf-ocr-") as tmp:
             tmpdir = Path(tmp)
+            total = doc.page_count
             for index, page in enumerate(doc):
+                if progress is not None:
+                    try:
+                        progress(index + 1, total)
+                    except Exception:
+                        pass
                 existing = page.get_text("text") or ""
                 if not _page_needs_ocr(existing):
                     continue
@@ -263,7 +285,7 @@ def ensure_scan_if_unselectable(path: Path | str) -> tuple[PdfAnalysis, bool]:
     return analysis, rasterized
 
 
-def enhance_pdf(path: Path | str) -> tuple[PdfAnalysis, bool, bool]:
+def enhance_pdf(path: Path | str, progress=None) -> tuple[PdfAnalysis, bool, bool]:
     """Rasterize if needed, then OCR scans so text can be selected.
 
     Returns (analysis, rasterized, ocr_done).
@@ -281,7 +303,7 @@ def enhance_pdf(path: Path | str) -> tuple[PdfAnalysis, bool, bool]:
     lang = tesseract_languages()
     if lang:
         try:
-            ocr_pages = ocr_pdf(path, lang=lang)
+            ocr_pages = ocr_pdf(path, lang=lang, progress=progress)
             if ocr_pages:
                 ocr_done = True
                 analysis = analyze_pdf(path)

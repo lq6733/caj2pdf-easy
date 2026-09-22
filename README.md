@@ -12,6 +12,7 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 - 不需要知网客户端，也不需要一直联网（第一次安装 Python 组件时需要）
 - 支持 CAJ、KDH、HN、C8，以及「后缀是 .caj、内容其实已经是 PDF」的文件
 - 自动识别扫描件（无法选中文字）。已安装 Tesseract 时，会识别中文/英文并写入可复制文字层
+- 也可单独识别已经是 PDF 的扫描件：点「识别图片 PDF」，另存为「原名-已识别.pdf」，不改原文件
 
 ## 你需要先有什么
 
@@ -88,12 +89,15 @@ chmod +x caj-to-pdf install-desktop.sh
 2. 点「选择文件」或「选择文件夹」
 3. 点「开始转换」
 4. PDF 会出现在原文件旁边
+5. 如果已经是图片版 PDF、没法选中文字，点「识别图片 PDF」。识别结果另存为「原名-已识别.pdf」
 
 命令行：
 
 ```bash
 python3 -m app --headless 论文.caj
 python3 -m app --headless 某个文件夹
+python3 -m app --ocr 扫描件.pdf
+python3 -m app --ocr 某个文件夹
 python3 -m app --selftest 某个文件夹 --out /tmp/caj2pdf-selftest
 ```
 
@@ -107,6 +111,7 @@ Windows 可以用 `开始转换.bat --headless 论文.caj`。
 
 - 这不是官方转换器，极少数文件会失败（尤其是几乎没有图片的纯文字 HN）
 - HN / C8 以及本身就是扫描件的文件，会先做成图片版 PDF；若系统装了 Tesseract（`chi_sim`），会再识别文字，方便搜索和复制。识别可能有错字
+- 已经是 PDF 的扫描件，可用「识别图片 PDF」或 `--ocr` 单独识别。原文件不会被覆盖
 - 纯文字 HN 在抽得出足够正文时，会生成可阅读的文字版 PDF，版面和原文不同
 
 ## 致谢

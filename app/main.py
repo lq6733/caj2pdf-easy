@@ -6,11 +6,11 @@ import os
 import sys
 from pathlib import Path
 
-from app.engine import collect_files, convert_file
+from app.engine import collect_files, collect_pdfs, convert_file, ocr_image_pdf
 from app.tools import has_display
 
 
-def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool, Path | None]:
+def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool, Path | None, bool]:
     files: list[Path] = []
     auto = False
     headless = False
@@ -18,6 +18,7 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
     gui = ""
     selftest = False
     out_dir: Path | None = None
+    ocr = False
     skip_next = False
     for index, arg in enumerate(argv):
         if skip_next:
@@ -30,6 +31,7 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             print("  --headless    不打开窗口，直接在终端转换")
             print("  --install     安装桌面快捷方式")
             print("  --selftest    自测转换准确率（结果写到临时目录，不覆盖原 PDF）")
+            print("  --ocr         识别图片版 PDF 的文字（另存为「原名-已识别.pdf」）")
             print("  --out 目录    自测输出目录")
             print("  --gui tk      使用 tkinter 界面（Windows / macOS 默认）")
             print("  --gui gtk     使用 GTK 界面（Linux 默认）")
@@ -48,6 +50,8 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             install = True
         elif arg in {"--selftest", "--check"}:
             selftest = True
+        elif arg in {"--ocr", "--ocr-pdf"}:
+            ocr = True
         elif arg in {"--out", "--output"}:
             if index + 1 >= len(argv):
                 raise SystemExit("请在 --out 后面写输出目录")
@@ -68,7 +72,33 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             files.append(Path(arg))
     if headless:
         auto = True
-    return files, auto, headless, install, gui, selftest, out_dir
+    return files, auto, headless, install, gui, selftest, out_dir, ocr
+
+
+def run_ocr(paths: list[Path]) -> int:
+    from app.scan import tesseract_install_message, tesseract_languages
+
+    files = collect_pdfs(paths)
+    if not files:
+        print("没有找到 PDF 文件。")
+        return 1
+    if not tesseract_languages():
+        print(tesseract_install_message())
+        return 1
+    failed = 0
+    for src in files:
+        print(f"正在识别：{src}")
+
+        def progress(page: int, total: int, name: str = src.name) -> None:
+            print(f"  正在识别 {page}/{total} 页：{name}", flush=True)
+
+        result = ocr_image_pdf(src, progress=progress)
+        print(("成功" if result.ok else "失败") + f"：{result.message}")
+        if not result.ok:
+            failed += 1
+            if result.detail:
+                print(result.detail)
+    return 1 if failed else 0
 
 
 def run_headless(paths: list[Path]) -> int:
@@ -138,7 +168,7 @@ def main() -> None:
         normalized.append(argv[i])
         i += 1
 
-    files, auto, headless, install, gui, selftest, out_dir = parse_args(normalized)
+    files, auto, headless, install, gui, selftest, out_dir, ocr = parse_args(normalized)
     if install:
         from app.install import install_shortcuts
 
@@ -147,6 +177,8 @@ def main() -> None:
         from app.selftest import run_selftest
 
         raise SystemExit(run_selftest(files, out_dir))
+    if ocr:
+        raise SystemExit(run_ocr(files))
 
     no_display = not has_display()
     if headless or (no_display and files):
