@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import traceback
 from dataclasses import dataclass, field
@@ -175,6 +176,9 @@ class CajWindow(Adw.ApplicationWindow):
         self.summary.set_wrap(True)
         self.summary.set_xalign(0)
         page.append(self.summary)
+        just = os.environ.get("CAJ2PDF_JUST_UPDATED", "").strip()
+        if just:
+            self.summary.set_text(f"已自动更新到 {just}。")
 
         css = Gtk.CssProvider()
         css.load_from_data(

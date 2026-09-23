@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import traceback
@@ -145,6 +146,9 @@ class CajTkWindow:
         self.progress_text.pack(anchor="w", padx=16)
         self.summary = ttk.Label(outer, text="", wraplength=700, justify="left")
         self.summary.pack(anchor="w", padx=16, pady=(4, 8))
+        just = os.environ.get("CAJ2PDF_JUST_UPDATED", "").strip()
+        if just:
+            self.summary.configure(text=f"已自动更新到 {just}。")
 
         try:
             self.root.option_add("*Font", self._font)

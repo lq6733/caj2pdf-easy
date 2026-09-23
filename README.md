@@ -13,6 +13,7 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 - 支持 CAJ、KDH、HN、C8，以及「后缀是 .caj、内容其实已经是 PDF」的文件
 - 自动识别扫描件（无法选中文字）。已安装 Tesseract 时，会识别中文/英文并写入可复制文字层
 - 也可单独识别已经是 PDF 的扫描件：点「识别图片 PDF」，另存为「原名-已识别.pdf」，不改原文件
+- 打开窗口时会检查更新；有新版本会自动下载并重启（需要联网）
 
 ## 你需要先有什么
 
@@ -98,6 +99,7 @@ python3 -m app --headless 论文.caj
 python3 -m app --headless 某个文件夹
 python3 -m app --ocr 扫描件.pdf
 python3 -m app --ocr 某个文件夹
+python3 -m app --update
 python3 -m app --selftest 某个文件夹 --out /tmp/caj2pdf-selftest
 ```
 

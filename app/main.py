@@ -10,7 +10,7 @@ from app.engine import collect_files, collect_pdfs, convert_file, ocr_image_pdf
 from app.tools import has_display
 
 
-def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool, Path | None, bool]:
+def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool, Path | None, bool, bool, bool]:
     files: list[Path] = []
     auto = False
     headless = False
@@ -19,6 +19,8 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
     selftest = False
     out_dir: Path | None = None
     ocr = False
+    no_update = False
+    do_update = False
     skip_next = False
     for index, arg in enumerate(argv):
         if skip_next:
@@ -32,6 +34,8 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             print("  --install     安装桌面快捷方式")
             print("  --selftest    自测转换准确率（结果写到临时目录，不覆盖原 PDF）")
             print("  --ocr         识别图片版 PDF 的文字（另存为「原名-已识别.pdf」）")
+            print("  --update      检查并安装最新版本")
+            print("  --no-update   本次不检查更新")
             print("  --out 目录    自测输出目录")
             print("  --gui tk      使用 tkinter 界面（Windows / macOS 默认）")
             print("  --gui gtk     使用 GTK 界面（Linux 默认）")
@@ -52,6 +56,10 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             selftest = True
         elif arg in {"--ocr", "--ocr-pdf"}:
             ocr = True
+        elif arg in {"--update", "--upgrade"}:
+            do_update = True
+        elif arg in {"--no-update", "--offline"}:
+            no_update = True
         elif arg in {"--out", "--output"}:
             if index + 1 >= len(argv):
                 raise SystemExit("请在 --out 后面写输出目录")
@@ -72,7 +80,7 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             files.append(Path(arg))
     if headless:
         auto = True
-    return files, auto, headless, install, gui, selftest, out_dir, ocr
+    return files, auto, headless, install, gui, selftest, out_dir, ocr, no_update, do_update
 
 
 def run_ocr(paths: list[Path]) -> int:
@@ -154,6 +162,36 @@ def launch_gui(files: list[Path], auto: bool, pref: str) -> None:
     raise SystemExit(1)
 
 
+def _run_update() -> int:
+    from app.update import maybe_update
+
+    info = maybe_update(force=True, restart=False)
+    if info.error:
+        print(info.error)
+        return 1
+    if not info.latest:
+        print("没法确认网上的版本。")
+        return 1
+    if not info.newer:
+        from app.update import parse_version
+
+        if info.latest and parse_version(info.current) > parse_version(info.latest):
+            print(f"本地已经是 {info.current}（网上是 {info.latest}），无需更新。")
+        else:
+            print(f"已经是最新版 {info.current}。")
+        return 0
+    print(f"已更新到 {info.latest}。")
+    return 0
+
+
+def _auto_update() -> None:
+    from app.update import maybe_update
+
+    info = maybe_update(force=False, restart=True)
+    if info.error and not info.error.startswith("暂时连不上"):
+        print(info.error, flush=True)
+
+
 def main() -> None:
     os.chdir(Path(__file__).resolve().parents[1])
     argv = sys.argv[1:]
@@ -168,7 +206,11 @@ def main() -> None:
         normalized.append(argv[i])
         i += 1
 
-    files, auto, headless, install, gui, selftest, out_dir, ocr = parse_args(normalized)
+    files, auto, headless, install, gui, selftest, out_dir, ocr, no_update, do_update = parse_args(normalized)
+    if do_update:
+        raise SystemExit(_run_update())
+    if not no_update and not (headless or install or selftest or ocr):
+        _auto_update()
     if install:
         from app.install import install_shortcuts
 

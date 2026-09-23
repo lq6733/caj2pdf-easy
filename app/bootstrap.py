@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -123,13 +124,14 @@ def ensure_runtime(optional_native: bool = True) -> None:
         pass
 
 
-def show_error(message: str, title: str = "CAJ 转 PDF") -> None:
-    print(message, file=sys.stderr)
+def _dialog(message: str, title: str, error: bool) -> None:
+    stream = sys.stderr if error else sys.stdout
+    print(message, file=stream, flush=True)
     if sys.platform == "win32":
         try:
             import ctypes
 
-            ctypes.windll.user32.MessageBoxW(0, message, title, 0x10)
+            ctypes.windll.user32.MessageBoxW(0, message, title, 0x10 if error else 0x40)
             return
         except Exception:
             pass
@@ -140,5 +142,16 @@ def show_error(message: str, title: str = "CAJ 转 PDF") -> None:
                 ["osascript", "-e", f'display dialog "{safe}" with title "{title}" buttons {{"好"}} default button 1'],
                 check=False,
             )
+            return
         except Exception:
             pass
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", title, message], check=False)
+
+
+def show_error(message: str, title: str = "CAJ 转 PDF") -> None:
+    _dialog(message, title, error=True)
+
+
+def show_info(message: str, title: str = "CAJ 转 PDF") -> None:
+    _dialog(message, title, error=False)
