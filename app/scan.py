@@ -15,6 +15,40 @@ CJK_CHARS_PER_PAGE = 8
 GARBLED_RATIO = 0.30
 OCR_MIN_CONF = 40.0
 
+_USEFUL_PUNCT = set('.,;:!?()[]{}\'"%-_@&，。、；：？！“”‘’（）【】《》—…·•')
+
+
+@dataclass
+class TextQuality:
+    chars: int = 0
+    nonspace: int = 0
+    cjk: int = 0
+    letters: int = 0
+    digits: int = 0
+    useful: int = 0
+    junk: int = 0
+
+    @property
+    def useful_ratio(self) -> float:
+        return self.useful / max(self.nonspace, 1)
+
+    @property
+    def junk_ratio(self) -> float:
+        return self.junk / max(self.nonspace, 1)
+
+    def is_readable(self, *, min_cjk: int = 80, min_letters: int = 80) -> bool:
+        if self.nonspace < 20:
+            return False
+        if self.junk_ratio >= 0.35 or self.useful_ratio < 0.55:
+            return False
+        if self.cjk >= min_cjk:
+            return True
+        return (
+            self.letters >= min_letters
+            and self.letters >= self.digits
+            and self.letters >= self.cjk * 3
+        )
+
 
 @dataclass
 class PdfAnalysis:
@@ -23,6 +57,7 @@ class PdfAnalysis:
     image_pages: int = 0
     text_chars: int = 0
     cjk_chars: int = 0
+    letter_chars: int = 0
     garbled_chars: int = 0
     selectable: bool = False
     is_scan: bool = False
@@ -42,6 +77,16 @@ class PdfAnalysis:
         return "unknown"
 
 
+def _is_cjk(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        0x4E00 <= code <= 0x9FFF
+        or 0x3400 <= code <= 0x4DBF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x2FA1F
+    )
+
+
 def _is_garbled_char(ch: str) -> bool:
     code = ord(ch)
     return (
@@ -50,6 +95,33 @@ def _is_garbled_char(ch: str) -> bool:
         or 0xF0000 <= code <= 0xFFFFD
         or 0x100000 <= code <= 0x10FFFD
     )
+
+
+def text_quality(text: str) -> TextQuality:
+    """Score whether extracted text is readable Chinese/English or mojibake."""
+    info = TextQuality(chars=len(text))
+    for ch in text:
+        if ch.isspace():
+            continue
+        info.nonspace += 1
+        if _is_cjk(ch):
+            info.cjk += 1
+            info.useful += 1
+        elif ch.isascii() and ch.isalpha():
+            info.letters += 1
+            info.useful += 1
+        elif ch.isdigit():
+            info.digits += 1
+            info.useful += 1
+        elif ch in _USEFUL_PUNCT:
+            info.useful += 1
+        else:
+            info.junk += 1
+    return info
+
+
+def text_is_readable(text: str, *, min_cjk: int = 80, min_letters: int = 80) -> bool:
+    return text_quality(text).is_readable(min_cjk=min_cjk, min_letters=min_letters)
 
 
 def analyze_pdf(path: Path | str) -> PdfAnalysis:
@@ -65,23 +137,24 @@ def analyze_pdf(path: Path | str) -> PdfAnalysis:
             return info
         for page in doc:
             text = page.get_text("text") or ""
-            cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-            garbled = sum(1 for ch in text if _is_garbled_char(ch))
-            info.text_chars += len(text)
-            info.cjk_chars += cjk
-            info.garbled_chars += garbled
+            quality = text_quality(text)
+            info.text_chars += quality.chars
+            info.cjk_chars += quality.cjk
+            info.letter_chars += quality.letters
+            info.garbled_chars += quality.junk
             images = page.get_images() or []
             if images:
                 info.image_pages += 1
-            meaningful = cjk >= CJK_CHARS_PER_PAGE or len(text.strip()) >= TEXT_CHARS_PER_PAGE
-            if meaningful and garbled <= max(8, int(0.2 * max(len(text), 1))):
+            if quality.is_readable(min_cjk=CJK_CHARS_PER_PAGE, min_letters=TEXT_CHARS_PER_PAGE):
                 info.text_pages += 1
         pages = max(info.pages, 1)
         garbled_ratio = info.garbled_chars / max(info.text_chars, 1)
+        chinese_ok = info.cjk_chars >= max(40, pages * CJK_CHARS_PER_PAGE)
+        english_ok = info.letter_chars >= max(80, pages * TEXT_CHARS_PER_PAGE) and info.cjk_chars < 8
         info.selectable = (
             info.text_pages >= max(1, int(pages * 0.4))
             and garbled_ratio < GARBLED_RATIO
-            and (info.cjk_chars >= pages * CJK_CHARS_PER_PAGE or info.text_chars >= pages * TEXT_CHARS_PER_PAGE)
+            and (chinese_ok or english_ok)
         )
         info.already_image_pdf = info.image_pages >= max(1, int(pages * 0.8)) and info.text_pages == 0
         has_visual = info.image_pages > 0
@@ -97,6 +170,8 @@ def analyze_pdf(path: Path | str) -> PdfAnalysis:
         info.needs_rasterize = (not info.selectable) and has_visual and not info.already_image_pdf
         if info.selectable:
             info.label = "可复制文字"
+        elif info.garbled_chars >= 80 and info.cjk_chars < max(40, pages * CJK_CHARS_PER_PAGE):
+            info.label = "文字层是乱码"
         elif info.is_scan or info.needs_rasterize:
             info.label = "扫描件，无法选中文字"
         else:
@@ -172,8 +247,10 @@ def tesseract_install_message() -> str:
 
 
 def _page_needs_ocr(text: str) -> bool:
-    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-    return cjk < CJK_CHARS_PER_PAGE and len(text.strip()) < TEXT_CHARS_PER_PAGE
+    return not text_quality(text).is_readable(
+        min_cjk=CJK_CHARS_PER_PAGE,
+        min_letters=TEXT_CHARS_PER_PAGE,
+    )
 
 
 def _tesseract_tsv(image: Path, lang: str) -> str:
@@ -305,14 +382,17 @@ def enhance_pdf(path: Path | str, progress=None) -> tuple[PdfAnalysis, bool, boo
         try:
             ocr_pages = ocr_pdf(path, lang=lang, progress=progress)
             if ocr_pages:
-                ocr_done = True
                 analysis = analyze_pdf(path)
-                analysis.ocr_applied = True
-                if analysis.selectable or analysis.cjk_chars >= 40:
+                if analysis.selectable:
+                    ocr_done = True
+                    analysis.ocr_applied = True
                     analysis.label = "扫描件，已识别文字，可复制"
                 else:
-                    analysis.label = "扫描件，识别到的文字较少"
-                    ocr_done = analysis.cjk_chars > 0
+                    analysis.ocr_applied = False
+                    if analysis.garbled_chars >= 80 and analysis.cjk_chars < 40:
+                        analysis.label = "文字层是乱码，识别不出可用中文"
+                    else:
+                        analysis.label = "扫描件，识别到的文字较少"
             else:
                 analysis = analyze_pdf(path)
         except Exception:

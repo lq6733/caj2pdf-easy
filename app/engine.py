@@ -340,8 +340,9 @@ def _try_text_pdf_fallback(source, output, format_name, exc, detail, tb) -> Conv
         text = extract_hn_text(source)
     except Exception:
         return None
-    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-    if cjk < 80 and len(text) < 400:
+    from app.scan import text_is_readable
+
+    if not text_is_readable(text, min_cjk=80, min_letters=120):
         return None
     try:
         write_text_pdf(text, output, title=source.stem)
@@ -494,6 +495,12 @@ def ocr_image_pdf(source: Path, output: Path | None = None, progress=None) -> Co
             skipped=True,
         )
 
+    broken_text_layer = (
+        analysis.image_pages == 0
+        and analysis.garbled_chars >= 80
+        and analysis.cjk_chars < max(40, analysis.pages * 20)
+    )
+
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest != source:
@@ -526,6 +533,20 @@ def ocr_image_pdf(source: Path, output: Path | None = None, progress=None) -> Co
             kind="ocr",
         )
 
+    if dest != source and dest.exists() and (broken_text_layer or not rasterized):
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+    if broken_text_layer:
+        return ConvertResult(
+            source=source,
+            output=None,
+            ok=False,
+            format_name="PDF",
+            message="这个 PDF 里的文字是乱码，页面上看着也是乱码，没法靠识别恢复。请用原始的 CAJ 或清晰扫描件重新转换。",
+            kind="scan",
+        )
     if rasterized:
         extra = "（原来的文件没有改动）" if unchanged else ""
         return ConvertResult(
@@ -536,12 +557,6 @@ def ocr_image_pdf(source: Path, output: Path | None = None, progress=None) -> Co
             message=f"已另存为扫描件，但没能识别出文字。已保存为：{dest.name}{extra}",
             kind="scan",
         )
-
-    if dest != source and dest.exists():
-        try:
-            dest.unlink()
-        except OSError:
-            pass
     return ConvertResult(
         source=source,
         output=None,
