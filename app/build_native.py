@@ -4,6 +4,11 @@
 from __future__ import annotations
 
 import os
+import platform
+import ssl
+import urllib.error
+import urllib.request
+import zipfile
 import shutil
 import subprocess
 import sys
@@ -235,6 +240,122 @@ def compiler_available() -> bool:
         return True
     except FileNotFoundError:
         return False
+
+
+
+
+def artifact_name() -> str:
+    os_name = {"linux": "Linux", "win32": "Windows", "darwin": "macOS"}.get(sys.platform, "Linux")
+    machine = platform.machine().lower()
+    if machine in {"amd64", "x86_64", "x64"}:
+        arch = "X64"
+    elif machine in {"arm64", "aarch64"}:
+        arch = "ARM64"
+    else:
+        arch = "X64"
+    return f"native-{os_name}-{arch}"
+
+
+def _http_get(url: str, timeout: float) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "caj2pdf-easy"})
+    context = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
+        return resp.read()
+
+
+def download_prebuilt() -> tuple[Path, Path]:
+    """Fetch CI-built libraries when this computer has no compiler."""
+    name = artifact_name()
+    urls = (
+        f"https://nightly.link/lq6733/caj2pdf-easy/workflows/ci.yml/main/{name}.zip",
+        f"https://nightly.link/lq6733/caj2pdf-easy/workflows/CI/main/{name}.zip",
+    )
+    data = b""
+    last = ""
+    for url in urls:
+        try:
+            print(f"正在下载图片解码库（{name}）…")
+            data = _http_get(url, timeout=40)
+            if data[:2] == b"PK":
+                break
+            last = f"{url}: 不是 zip"
+            data = b""
+        except (urllib.error.URLError, TimeoutError, ssl.SSLError, OSError) as exc:
+            last = f"{url}: {exc}"
+            data = b""
+    if not data:
+        raise RuntimeError(last or "自动下载解码库失败")
+
+    VENDOR.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    with tempfile.TemporaryDirectory(prefix="caj2pdf-native-") as tmp:
+        archive = Path(tmp) / "native.zip"
+        archive.write_bytes(data)
+        extracted = Path(tmp) / "out"
+        extracted.mkdir()
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(extracted)
+        for src in extracted.rglob("*"):
+            if not src.is_file():
+                continue
+            if not src.name.startswith("libjbig"):
+                continue
+            dest = VENDOR / src.name
+            shutil.copy2(src, dest)
+            copied.append(dest)
+            print(f"已下载 {dest.name}")
+    dec, codec = library_paths()
+    if not dec.is_file() or not codec.is_file():
+        names = ", ".join(p.name for p in copied) or "无"
+        raise RuntimeError(f"下载完成但缺少解码库（得到：{names}）")
+    return dec, codec
+
+
+def ensure_libraries() -> tuple[bool, str]:
+    """Make sure decoder libs exist. Returns (ok, help_text)."""
+    if libraries_exist():
+        return True, ""
+    errors: list[str] = []
+    if compiler_available():
+        try:
+            print("正在编译图片解码库…")
+            build()
+            if libraries_exist():
+                return True, ""
+        except Exception as exc:
+            errors.append(f"自动编译失败：{exc}")
+    else:
+        errors.append(_compiler_help())
+    try:
+        download_prebuilt()
+        if libraries_exist():
+            return True, ""
+    except Exception as exc:
+        errors.append(f"自动下载失败：{exc}")
+    return False, "\n".join(x for x in errors if x)
+
+
+def library_help(detail: str = "") -> str:
+    if libraries_exist():
+        return (
+            "这个文件有扫描图片，需要图片解码库，但当前程序没能加载它。"
+            "请确认使用的是 64 位 Python。"
+            "也可以删掉 vendor/caj2pdf 里的 libjbigdec / libjbig2codec 后重新打开本工具，让它自动重编或下载。"
+        )
+    extra = detail
+    if not extra:
+        ok, extra = ensure_libraries()
+        if ok:
+            return "图片解码库已经准备好。请再点一次「开始转换」。"
+    bits = [
+        "这个文件有扫描图片，需要图片解码库，但这台电脑上还没有。",
+        "普通 CAJ / KDH 一般不受影响；HN / C8 扫描件需要这个库。",
+    ]
+    for item in (extra, _compiler_help()):
+        if item and item not in bits:
+            bits.append(item)
+    bits.append("装好编译器或联网后，重新打开本工具会自动再试。也可以把对应系统的 libjbigdec / libjbig2codec 放到 vendor/caj2pdf/ 目录。")
+    return "\n".join(bits)
 
 
 if __name__ == "__main__":

@@ -31,7 +31,6 @@ FRIENDLY_ERRORS = (
     ("Unknown Image Type", "文件里的图片格式还不支持。"),
     ("unusual image offset", "这个文件结构比较特殊，转换失败了。"),
     ("%%EOF mark can't be found", "文件可能不完整或已损坏。"),
-    ("找不到解码库", "程序安装不完整，缺少图片解码库。"),
     ("Unknown file type", "这不是能识别的 CAJ/KDH 文件。"),
     ("Unsupported file type", "这种格式还不支持。"),
     ("File is pure-text HN", "这个文件几乎是纯文字，当前方法没法直接生成 PDF。"),
@@ -131,13 +130,17 @@ def detect_format(source: Path) -> str:
     return getattr(parser, "format", "未知")
 
 
-def _friendly_error(exc: BaseException) -> str:
+def _friendly_error(exc: BaseException, lib_detail: str = "") -> str:
     text = str(exc).strip() or exc.__class__.__name__
     if isinstance(exc, SystemExit):
         if isinstance(exc.code, int):
             text = f"转换程序异常退出（代码 {exc.code}）"
         else:
             text = str(exc.code or "转换失败")
+    if "找不到解码库" in text:
+        from app.build_native import library_help
+
+        return library_help(lib_detail)
     for needle, message in FRIENDLY_ERRORS:
         if needle.lower() in text.lower():
             return message
@@ -372,6 +375,13 @@ def convert_file(source: Path, output: Path | None = None, progress=None) -> Con
         return ConvertResult(source, None, False, "未知", "只支持 CAJ、KDH、NH 这些知网下载的文件。")
 
     _ensure_vendor_path()
+    lib_detail = ""
+    try:
+        from app.build_native import ensure_libraries
+
+        _ok, lib_detail = ensure_libraries()
+    except Exception as exc:
+        lib_detail = str(exc)
     log = io.StringIO()
     format_name = "未知"
     try:
@@ -393,7 +403,7 @@ def convert_file(source: Path, output: Path | None = None, progress=None) -> Con
             output=None,
             ok=False,
             format_name=format_name,
-            message=_friendly_error(exc),
+            message=_friendly_error(exc, lib_detail),
             detail="\n".join(x for x in (detail, tb) if x).strip(),
         )
 

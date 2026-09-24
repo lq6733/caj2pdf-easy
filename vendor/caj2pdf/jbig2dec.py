@@ -26,9 +26,9 @@ def _candidate_names(base):
         names.append("lib%s.dll" % base)
         names.append("%s.dll" % base)
     elif sys.platform == "darwin":
-        names.extend(["lib%s.dylib" % base, "lib%s.so" % base])
+        names.append("lib%s.dylib" % base)
     else:
-        names.extend(["lib%s.so" % base, "lib%s.dylib" % base])
+        names.append("lib%s.so" % base)
     return names
 
 def _load_lib(base):

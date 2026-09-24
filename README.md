@@ -25,13 +25,13 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 | macOS | 可用 python.org 安装包，或先运行 `xcode-select --install`。扫描件识别：`brew install tesseract tesseract-lang` |
 | Linux | 再装 GTK 界面更美观；没有 GTK 时会尝试 tkinter。扫描件识别见下面的 Tesseract 软件包 |
 
-含扫描页的 HN / C8 需要编译一个很小的解码库。程序会在第一次运行时自动编译：
+含扫描页的 HN / C8 需要很小的图片解码库（`libjbigdec` / `libjbig2codec`）。Linux x86-64 下载本仓库后就已经带上了。其他系统会在转换前自动编译；没有编译器时，会再尝试下载 GitHub Actions 编好的库：
 
 - Windows：安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，勾选「使用 C++ 的桌面开发」；或安装 MinGW 的 `g++`
 - macOS：运行 `xcode-select --install`
 - Linux：Debian/Ubuntu 执行 `sudo apt install build-essential`
 
-没有编译器时，普通 CAJ / KDH 通常仍能转换。也可以到 GitHub Actions 的 Artifacts 下载对应系统的 `libjbigdec` / `libjbig2codec`，放到 `vendor/caj2pdf/` 目录。
+没有解码库时，普通 CAJ / KDH 通常仍能转换。也可以把对应系统的 `libjbigdec` / `libjbig2codec` 放到 `vendor/caj2pdf/` 目录。
 
 ### Linux 可选软件包（更漂亮的界面）
 

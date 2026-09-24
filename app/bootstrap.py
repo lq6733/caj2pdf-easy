@@ -96,20 +96,22 @@ def install_deps() -> None:
 
 
 def ensure_native(optional: bool = True) -> None:
-    from app.build_native import build, libraries_exist
+    from app.build_native import ensure_libraries, libraries_exist
 
     if libraries_exist():
         return
-    _print("正在编译图片解码库（只需这一次）…")
-    try:
-        build()
-    except Exception as exc:
-        message = f"图片解码库编译失败：{exc}"
-        if optional:
-            _print(message)
-            _print("普通 CAJ/KDH 仍可转换；含扫描图片的 HN/C8 可能失败。")
-            return
-        raise RuntimeError(message) from exc
+    _print("正在准备图片解码库（只需这一次）…")
+    ok, detail = ensure_libraries()
+    if ok:
+        return
+    message = "图片解码库还没准备好。"
+    if detail:
+        message += "\n" + detail
+    if optional:
+        _print(message)
+        _print("普通 CAJ/KDH 仍可转换；含扫描图片的 HN/C8 可能失败。装好编译器或联网后会再试。")
+        return
+    raise RuntimeError(message)
 
 
 def ensure_runtime(optional_native: bool = True) -> None:
