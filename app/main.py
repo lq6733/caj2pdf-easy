@@ -27,7 +27,7 @@ def parse_args(argv: list[str]) -> tuple[list[Path], bool, bool, bool, str, bool
             skip_next = False
             continue
         if arg in {"-h", "--help"}:
-            print("CAJ 转 PDF")
+            print("CAJ / EPUB 转 PDF")
             print("用法: python -m app [选项] [文件或文件夹...]")
             print("  --auto        打开窗口后自动开始转换")
             print("  --headless    不打开窗口，直接在终端转换")
@@ -112,7 +112,7 @@ def run_ocr(paths: list[Path]) -> int:
 def run_headless(paths: list[Path]) -> int:
     files = collect_files(paths)
     if not files:
-        print("没有找到可以转换的 CAJ/KDH 文件。")
+        print("没有找到可以转换的 CAJ / KDH / EPUB 文件。")
         return 1
     failed = 0
     for src in files:

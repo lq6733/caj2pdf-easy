@@ -76,7 +76,7 @@ class CajWindow(Adw.ApplicationWindow):
 
         hint = Gtk.Label(
             label=(
-                "把知网下载的 CAJ 拖进来，点「开始转换」。\n"
+                "把知网下载的 CAJ，或 EPUB 电子书拖进来，点「开始转换」。\n"
                 "已经是图片版 PDF、没法选中文字时，点「识别图片 PDF」。\n"
                 "转换结果在原文件旁边；识别结果另存为「原名-已识别.pdf」，原来的 PDF 不会改。"
             )
@@ -93,9 +93,9 @@ class CajWindow(Adw.ApplicationWindow):
         drop_box.set_margin_bottom(28)
         drop_box.set_margin_start(16)
         drop_box.set_margin_end(16)
-        drop_title = Gtk.Label(label="把 CAJ 或图片版 PDF 拖到这里")
+        drop_title = Gtk.Label(label="把 CAJ、EPUB 或图片版 PDF 拖到这里")
         drop_title.add_css_class("title-3")
-        drop_sub = Gtk.Label(label="CAJ 用来转换成 PDF，图片 PDF 用来识别文字")
+        drop_sub = Gtk.Label(label="CAJ / EPUB 用来转换成 PDF，图片 PDF 用来识别文字")
         drop_sub.add_css_class("dim-label")
         drop_box.append(drop_title)
         drop_box.append(drop_sub)
@@ -136,7 +136,7 @@ class CajWindow(Adw.ApplicationWindow):
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.listbox.add_css_class("boxed-list")
-        self.empty_row = Gtk.Label(label="还没有文件。请选择 CAJ 转换，或点「识别图片 PDF」。")
+        self.empty_row = Gtk.Label(label="还没有文件。请选择 CAJ 或 EPUB 转换，或点「识别图片 PDF」。")
         self.empty_row.add_css_class("dim-label")
         self.empty_row.set_margin_top(24)
         self.empty_row.set_margin_bottom(24)
@@ -227,9 +227,10 @@ class CajWindow(Adw.ApplicationWindow):
     def _caj_filters(self) -> Gio.ListStore:
         store = Gio.ListStore.new(Gtk.FileFilter)
         caj = Gtk.FileFilter()
-        caj.set_name("知网文件（CAJ/KDH/NH）")
-        for suffix in ("caj", "kdh", "nh", "hn", "c8"):
+        caj.set_name("可转换文件（CAJ/EPUB）")
+        for suffix in ("caj", "kdh", "nh", "hn", "c8", "epub"):
             caj.add_suffix(suffix)
+        caj.add_mime_type("application/epub+zip")
         store.append(caj)
         all_files = Gtk.FileFilter()
         all_files.set_name("所有文件")
@@ -251,7 +252,7 @@ class CajWindow(Adw.ApplicationWindow):
         return store
 
     def _choose_files(self, *_args) -> None:
-        dialog = Gtk.FileDialog(title="选择要转换的 CAJ 文件")
+        dialog = Gtk.FileDialog(title="选择要转换的 CAJ 或 EPUB 文件")
         filters = self._caj_filters()
         dialog.set_filters(filters)
         dialog.set_default_filter(filters.get_item(0))
@@ -271,7 +272,7 @@ class CajWindow(Adw.ApplicationWindow):
         self.add_paths(paths)
 
     def _choose_folder(self, *_args) -> None:
-        dialog = Gtk.FileDialog(title="选择包含 CAJ 或 PDF 的文件夹")
+        dialog = Gtk.FileDialog(title="选择包含 CAJ、EPUB 或 PDF 的文件夹")
         dialog.select_folder(self, None, self._on_folder_chosen)
 
     def _on_folder_chosen(self, dialog: Gtk.FileDialog, result) -> None:
@@ -336,11 +337,11 @@ class CajWindow(Adw.ApplicationWindow):
         if added_caj or added_pdf:
             self.refresh_list()
         if not cajs and not pdfs:
-            self.summary.set_text("没有找到 CAJ 或 PDF 文件。请确认选的是知网下载的论文，或图片版 PDF。")
+            self.summary.set_text("没有找到可以转换的文件。请选择 CAJ、EPUB，或图片版 PDF。")
             return
         bits: list[str] = []
         if added_caj:
-            bits.append(f"已加入 {added_caj} 个 CAJ，点「开始转换」。")
+            bits.append(f"已加入 {added_caj} 个文件，点「开始转换」。")
         if added_pdf:
             bits.append(f"已加入 {added_pdf} 个 PDF，点「识别图片 PDF」识别文字。")
         if bits:
@@ -429,7 +430,7 @@ class CajWindow(Adw.ApplicationWindow):
             return
         jobs = self._pending("convert")
         if not jobs:
-            self.summary.set_text("请先选择要转换的 CAJ 文件。图片版 PDF 请点「识别图片 PDF」。")
+            self.summary.set_text("请先选择要转换的 CAJ 或 EPUB 文件。图片版 PDF 请点「识别图片 PDF」。")
             return
         self._run_jobs("convert", jobs)
         return False
@@ -509,7 +510,8 @@ class CajWindow(Adw.ApplicationWindow):
     def _mark_page(self, job: Job, page: int, pages: int, index: int, total: int) -> bool:
         fraction = ((index - 1) + (page / max(pages, 1))) / max(total, 1)
         self.progress.set_fraction(min(1.0, fraction))
-        self.progress.set_text(f"正在识别 {page}/{pages} 页：{job.path.name}")
+        verb = "正在识别" if self._active_task == "ocr" else "正在转换"
+        self.progress.set_text(f"{verb} {page}/{pages} 页：{job.path.name}")
         return False
 
     def _status_for(self, task: str, result: ConvertResult) -> str:
@@ -560,7 +562,7 @@ class CajWindow(Adw.ApplicationWindow):
         elif fail_n == 0:
             self.progress.set_text("全部完成")
             self.summary.set_text(
-                f"已经全部转好，共 {ok_n} 个 PDF。文件就在原来的 CAJ 旁边，用文档阅读器打开即可。"
+                f"已经全部转好，共 {ok_n} 个 PDF。文件就在原来的文件旁边，用文档阅读器打开即可。"
             )
         elif ok_n == 0:
             self.progress.set_text("转换失败")

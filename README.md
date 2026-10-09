@@ -1,6 +1,6 @@
 # CAJ 转 PDF / caj2pdf-easy
 
-把中国知网的 **CAJ / KDH / HN / C8** 文件转成普通 PDF。给完全不熟悉电脑的人用：选文件、点一下，就能转。
+把中国知网的 **CAJ / KDH / HN / C8** 文件，以及 **EPUB** 电子书，转成普通 PDF。给完全不熟悉电脑的人用：选文件、点一下，就能转。
 
 This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) for **Windows, macOS, and Linux**.
 
@@ -11,6 +11,7 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 - 转换后的 PDF 保存在原文件旁边
 - 不需要知网客户端，也不需要一直联网（第一次安装 Python 组件时需要）
 - 支持 CAJ、KDH、HN、C8，以及「后缀是 .caj、内容其实已经是 PDF」的文件
+- 支持 EPUB 电子书：自动排成 A4 页面，一般可以选中和复制文字
 - 自动识别扫描件（无法选中文字）。已安装 Tesseract 时，会识别中文/英文并写入可复制文字层
 - 也可单独识别已经是 PDF 的扫描件：点「识别图片 PDF」，另存为「原名-已识别.pdf」，不改原文件
 - 打开窗口时会检查更新；有新版本会自动下载并重启（需要联网）
@@ -96,6 +97,7 @@ chmod +x caj-to-pdf install-desktop.sh
 
 ```bash
 python3 -m app --headless 论文.caj
+python3 -m app --headless 书.epub
 python3 -m app --headless 某个文件夹
 python3 -m app --ocr 扫描件.pdf
 python3 -m app --ocr 某个文件夹
@@ -112,6 +114,7 @@ Windows 可以用 `开始转换.bat --headless 论文.caj`。
 ## 限制
 
 - 这不是官方转换器，极少数文件会失败（尤其是几乎没有图片的纯文字 HN）
+- EPUB 会按 A4 重新排版，复杂杂志式排版可能和原书不完全一样；有版权保护（DRM）的电子书没法转
 - HN / C8 以及本身就是扫描件的文件，会先做成图片版 PDF；若系统装了 Tesseract（`chi_sim`），会再识别文字，方便搜索和复制。识别可能有错字
 - 已经是 PDF 的扫描件，可用「识别图片 PDF」或 `--ocr` 单独识别。原文件不会被覆盖
 - 若页面上看到的就是 `/ $ #` 这类乱码，说明这是失败的文字提取结果，不是扫描图片，识别也无法还原。请用原始 CAJ 重新转换

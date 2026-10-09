@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wrap caj2pdf so the GUI can convert files with friendly Chinese errors."""
+"""Wrap caj2pdf and EPUB conversion so the GUI can convert files with friendly Chinese errors."""
 
 from __future__ import annotations
 
@@ -16,7 +16,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "vendor" / "caj2pdf"
 
-SUPPORTED_SUFFIXES = {".caj", ".kdh", ".nh", ".hn", ".c8"}
+CAJ_SUFFIXES = {".caj", ".kdh", ".nh", ".hn", ".c8"}
+EPUB_SUFFIXES = {".epub"}
+SUPPORTED_SUFFIXES = CAJ_SUFFIXES | EPUB_SUFFIXES
+
+# Reflow EPUB onto A4 so Chinese books are readable without extra software.
+EPUB_PAGE_WIDTH = 595.0
+EPUB_PAGE_HEIGHT = 842.0
+EPUB_FONTSIZE = 12
 
 FORMAT_NAMES = {
     "CAJ": "知网 CAJ",
@@ -24,6 +31,7 @@ FORMAT_NAMES = {
     "KDH": "知网 KDH",
     "PDF": "假后缀 PDF（文件本身已经是 PDF）",
     "C8": "知网 C8（较新格式）",
+    "EPUB": "电子书 EPUB",
 }
 
 FRIENDLY_ERRORS = (
@@ -62,11 +70,15 @@ def is_supported_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
 
 
+def is_epub_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in EPUB_SUFFIXES
+
+
 def is_pdf_file(path: Path) -> bool:
     if not path.is_file() or path.suffix.lower() != ".pdf":
         return False
     name = path.name.lower()
-    return not (name.endswith(".ocr-tmp.pdf") or name.endswith(".scan-tmp.pdf"))
+    return not (name.endswith(".ocr-tmp.pdf") or name.endswith(".scan-tmp.pdf") or name.endswith(".epub-tmp.pdf"))
 
 
 def _collect_matching(paths: list[Path], predicate) -> list[Path]:
@@ -123,6 +135,9 @@ def _ensure_vendor_path() -> None:
 
 
 def detect_format(source: Path) -> str:
+    source = Path(source)
+    if source.suffix.lower() in EPUB_SUFFIXES:
+        return "EPUB"
     _ensure_vendor_path()
     from cajparser import CAJParser
 
@@ -149,6 +164,116 @@ def _friendly_error(exc: BaseException, lib_detail: str = "") -> str:
     if len(text) > 160:
         text = text[:157] + "…"
     return f"转换失败：{text}"
+
+
+def _friendly_epub_error(exc: BaseException) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    low = text.lower()
+    if any(token in low for token in ("password", "encrypt", "drm", "needs_pass")):
+        return "这个 EPUB 有密码或版权保护，没法转换。"
+    if any(token in low for token in ("not a zip", "zipfile", "cannot open", "failed to open", "not epub", "broken", "no media", "as type epub")):
+        return "这不是能打开的 EPUB 文件，可能已损坏。"
+    if len(text) > 160:
+        text = text[:157] + "…"
+    return f"EPUB 转换失败：{text}"
+
+
+def open_epub(source: Path):
+    import pymupdf
+
+    return pymupdf.open(
+        str(source),
+        filetype="epub",
+        width=EPUB_PAGE_WIDTH,
+        height=EPUB_PAGE_HEIGHT,
+        fontsize=EPUB_FONTSIZE,
+    )
+
+
+def convert_epub_file(source: Path, output: Path, progress=None) -> ConvertResult:
+    format_name = FORMAT_NAMES["EPUB"]
+    try:
+        import pymupdf
+    except Exception as exc:
+        return ConvertResult(source, None, False, format_name, f"缺少 PDF 组件（PyMuPDF）：{exc}")
+
+    try:
+        doc = open_epub(source)
+    except Exception as exc:
+        return ConvertResult(
+            source,
+            None,
+            False,
+            format_name,
+            _friendly_epub_error(exc),
+            detail=traceback.format_exc(),
+        )
+
+    tmp = output.with_name(output.stem + ".epub-tmp.pdf")
+    try:
+        if getattr(doc, "needs_pass", False):
+            return ConvertResult(source, None, False, format_name, "这个 EPUB 有密码或版权保护，没法转换。")
+        pages = int(getattr(doc, "page_count", 0) or 0)
+        if pages <= 0:
+            return ConvertResult(source, None, False, format_name, "这个 EPUB 是空的，没有可转换的内容。")
+        if progress:
+            try:
+                progress(1, pages)
+            except Exception:
+                pass
+        pdf_bytes = doc.convert_to_pdf()
+        out = pymupdf.open("pdf", pdf_bytes)
+        try:
+            toc = doc.get_toc()
+            if toc:
+                try:
+                    out.set_toc(toc)
+                except Exception:
+                    pass
+            meta = doc.metadata or {}
+            title = (meta.get("title") or "").strip() or source.stem
+            author = (meta.get("author") or "").strip()
+            try:
+                out.set_metadata({"title": title, "author": author})
+            except Exception:
+                pass
+            output.parent.mkdir(parents=True, exist_ok=True)
+            out.save(tmp, garbage=4, deflate=True)
+            tmp.replace(output)
+        finally:
+            out.close()
+        if progress:
+            try:
+                progress(pages, pages)
+            except Exception:
+                pass
+    except Exception as exc:
+        return ConvertResult(
+            source,
+            None,
+            False,
+            format_name,
+            _friendly_epub_error(exc),
+            detail=traceback.format_exc(),
+        )
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+        if tmp.exists() and tmp.resolve() != output.resolve():
+            tmp.unlink(missing_ok=True)
+
+    if not output.exists() or output.stat().st_size < 32:
+        return ConvertResult(source, None, False, format_name, "转换过程没有生成可用的 PDF。")
+    return ConvertResult(
+        source=source,
+        output=output,
+        ok=True,
+        format_name=format_name,
+        message=f"电子书已排成 A4 页面，可以选中和复制文字。成功，已保存为：{output.name}",
+        kind="text",
+    )
 
 
 @contextlib.contextmanager
@@ -371,8 +496,10 @@ def convert_file(source: Path, output: Path | None = None, progress=None) -> Con
     output = Path(output).expanduser().resolve() if output else default_output_for(source)
     if not source.exists():
         return ConvertResult(source, None, False, "未知", "找不到这个文件。可能被移动或删除了。")
+    if is_epub_file(source):
+        return convert_epub_file(source, output, progress)
     if not is_supported_file(source):
-        return ConvertResult(source, None, False, "未知", "只支持 CAJ、KDH、NH 这些知网下载的文件。")
+        return ConvertResult(source, None, False, "未知", "只支持 CAJ、KDH、NH 这些知网下载的文件，以及 EPUB 电子书。")
 
     _ensure_vendor_path()
     lib_detail = ""

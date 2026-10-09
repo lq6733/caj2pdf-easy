@@ -49,10 +49,10 @@ def _ui_font() -> tuple[str, int]:
 
 def _filetypes() -> list[tuple[str, str]]:
     if sys.platform == "win32":
-        patterns = "*.caj;*.kdh;*.hn;*.nh;*.c8"
+        patterns = "*.caj;*.kdh;*.hn;*.nh;*.c8;*.epub"
     else:
-        patterns = "*.caj *.kdh *.hn *.nh *.c8"
-    return [("知网文件", patterns), ("所有文件", "*.*")]
+        patterns = "*.caj *.kdh *.hn *.nh *.c8 *.epub"
+    return [("可转换文件", patterns), ("所有文件", "*.*")]
 
 
 def _pdf_filetypes() -> list[tuple[str, str]]:
@@ -93,7 +93,7 @@ class CajTkWindow:
         hint = ttk.Label(
             outer,
             text=(
-                "选择知网下载的 CAJ 文件，点「开始转换」。\n"
+                "选择知网下载的 CAJ，或 EPUB 电子书，点「开始转换」。\n"
                 "已经是图片版 PDF 时，点「识别图片 PDF」。\n"
                 "转换结果在原文件旁边；识别结果另存为「原名-已识别.pdf」，原来的 PDF 不会改。"
             ),
@@ -157,12 +157,12 @@ class CajTkWindow:
         self.btn_convert.state(["disabled"])
 
     def _choose_files(self) -> None:
-        paths = filedialog.askopenfilenames(title="选择要转换的 CAJ 文件", filetypes=_filetypes())
+        paths = filedialog.askopenfilenames(title="选择要转换的 CAJ 或 EPUB 文件", filetypes=_filetypes())
         if paths:
             self.add_paths([Path(p) for p in paths])
 
     def _choose_folder(self) -> None:
-        folder = filedialog.askdirectory(title="选择包含 CAJ 或 PDF 的文件夹")
+        folder = filedialog.askdirectory(title="选择包含 CAJ、EPUB 或 PDF 的文件夹")
         if folder:
             self.add_paths([Path(folder)])
 
@@ -199,11 +199,11 @@ class CajTkWindow:
         if added_caj or added_pdf:
             self.refresh_list()
         if not cajs and not pdfs:
-            self.summary.configure(text="没有找到 CAJ 或 PDF 文件。请确认选的是知网下载的论文，或图片版 PDF。")
+            self.summary.configure(text="没有找到可以转换的文件。请选择 CAJ、EPUB，或图片版 PDF。")
             return
         bits: list[str] = []
         if added_caj:
-            bits.append(f"已加入 {added_caj} 个 CAJ，点「开始转换」。")
+            bits.append(f"已加入 {added_caj} 个文件，点「开始转换」。")
         if added_pdf:
             bits.append(f"已加入 {added_pdf} 个 PDF，点「识别图片 PDF」识别文字。")
         if bits:
@@ -263,7 +263,7 @@ class CajTkWindow:
             return
         jobs = self._pending("convert")
         if not jobs:
-            self.summary.configure(text="请先选择要转换的 CAJ 文件。图片版 PDF 请点「识别图片 PDF」。")
+            self.summary.configure(text="请先选择要转换的 CAJ 或 EPUB 文件。图片版 PDF 请点「识别图片 PDF」。")
             return
         self._run_jobs("convert", jobs)
 
@@ -346,7 +346,8 @@ class CajTkWindow:
         self.progress["maximum"] = 1000
         fraction = ((index - 1) + (page / max(pages, 1))) / max(total, 1)
         self.progress["value"] = min(1000, fraction * 1000)
-        self.progress_text.configure(text=f"正在识别 {page}/{pages} 页：{job.path.name}")
+        verb = "正在识别" if self._active_task == "ocr" else "正在转换"
+        self.progress_text.configure(text=f"{verb} {page}/{pages} 页：{job.path.name}")
 
     def _status_for(self, task: str, result: ConvertResult) -> str:
         if task == "ocr":
@@ -396,7 +397,7 @@ class CajTkWindow:
         elif fail_n == 0:
             self.progress_text.configure(text="全部完成")
             self.summary.configure(
-                text=f"已经全部转好，共 {ok_n} 个 PDF。文件就在原来的 CAJ 旁边，用文档阅读器打开即可。"
+                text=f"已经全部转好，共 {ok_n} 个 PDF。文件就在原来的文件旁边，用文档阅读器打开即可。"
             )
         elif ok_n == 0:
             self.progress_text.configure(text="转换失败")

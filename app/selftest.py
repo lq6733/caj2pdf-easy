@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from app.engine import ConvertResult, collect_files, convert_file, detect_format, extract_hn_text
+from app.engine import ConvertResult, collect_files, convert_file, detect_format, extract_hn_text, open_epub
 
 GRADE_ACCURATE = "准确"
 GRADE_PARTIAL = "部分可用"
@@ -48,6 +48,15 @@ def _expected_pages(source: Path, format_code: str) -> int | None:
             import pymupdf
 
             doc = pymupdf.open(source)
+            try:
+                return doc.page_count
+            finally:
+                doc.close()
+        except Exception:
+            return None
+    if format_code == "EPUB":
+        try:
+            doc = open_epub(source)
             try:
                 return doc.page_count
             finally:
@@ -114,6 +123,14 @@ def _pdf_source_text(source: Path) -> str:
     import pymupdf
 
     doc = pymupdf.open(source)
+    try:
+        return "\n".join(page.get_text("text") or "" for page in doc)
+    finally:
+        doc.close()
+
+
+def _epub_source_text(source: Path) -> str:
+    doc = open_epub(source)
     try:
         return "\n".join(page.get_text("text") or "" for page in doc)
     finally:
@@ -208,6 +225,17 @@ def evaluate_conversion(source: Path, result: ConvertResult) -> FileReport:
         except Exception as exc:
             notes.append(f"无法对照原 PDF 文字：{exc}")
 
+    if format_code == "EPUB":
+        try:
+            original = _epub_source_text(source)
+            report.similarity = _similarity(original, info["text"])
+            if report.similarity < 0.85:
+                notes.append(f"和原 EPUB 文字不一致（相似度 {report.similarity:.0%}）")
+        except Exception as exc:
+            notes.append(f"无法对照原 EPUB 文字：{exc}")
+        if info["text_chars"] < 40 and info["image_pages"] == 0:
+            notes.append("页面里几乎没有文字或图片")
+
     if format_code in {"HN", "C8"} and info["image_pages"] == 0 and info["cjk_chars"] < 80:
         notes.append("扫描页既没有图片也几乎没有文字")
 
@@ -222,8 +250,9 @@ def evaluate_conversion(source: Path, result: ConvertResult) -> FileReport:
         and format_code != "PDF"
     )
     weak_pdf_text = format_code == "PDF" and (report.similarity is not None and report.similarity < 0.95)
+    weak_epub_text = format_code == "EPUB" and (report.similarity is not None and report.similarity < 0.85)
 
-    if mismatch or mostly_blank or weak_content or weak_pdf_text:
+    if mismatch or mostly_blank or weak_content or weak_pdf_text or weak_epub_text:
         report.grade = GRADE_PARTIAL
         return report
 
@@ -247,7 +276,7 @@ def _unique_dest(out_dir: Path, source: Path, used: set[str]) -> Path:
 def run_selftest(paths: list[Path], out_dir: Path | None = None) -> int:
     files = collect_files(paths)
     if not files:
-        print("没有找到可以自测的 CAJ/KDH 文件。请加上文件或文件夹路径。")
+        print("没有找到可以自测的 CAJ / KDH / EPUB 文件。请加上文件或文件夹路径。")
         return 1
 
     if out_dir is None:
