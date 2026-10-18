@@ -20,6 +20,14 @@ from app.engine import (
     ocr_image_pdf,
 )
 from app.scan import tesseract_install_message, tesseract_languages
+from app.tk_theme import (
+    apply_theme,
+    apply_window_icon,
+    draw_drop_card,
+    enable_dpi,
+    header_icon_photo,
+    ui_fonts,
+)
 from app.tools import open_path
 
 APP_TITLE = "CAJ 转 PDF"
@@ -37,14 +45,6 @@ class Job:
     kind: str = ""
     detail: str = ""
     skipped: bool = False
-
-
-def _ui_font() -> tuple[str, int]:
-    if sys.platform == "win32":
-        return ("Microsoft YaHei UI", 10)
-    if sys.platform == "darwin":
-        return ("PingFang SC", 13)
-    return ("Noto Sans CJK SC", 10)
 
 
 def _filetypes() -> list[tuple[str, str]]:
@@ -65,15 +65,20 @@ def _pdf_filetypes() -> list[tuple[str, str]]:
 
 class CajTkWindow:
     def __init__(self, initial_files: list[Path], auto_start: bool) -> None:
+        enable_dpi()
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("760x620")
-        self.root.minsize(560, 480)
+        self.root.geometry("820x680")
+        self.root.minsize(640, 540)
         self.jobs: list[Job] = []
         self.busy = False
         self._active_task = "convert"
         self._auto_start = auto_start
-        self._font = _ui_font()
+        self._fonts = ui_fonts()
+        self._colors = apply_theme(self.root)
+        self._icon_photos = apply_window_icon(self.root)
+        self._header_icon = header_icon_photo(48)
+        self._drop_hover = False
         self._build()
         if initial_files:
             self.add_paths(initial_files)
@@ -84,56 +89,84 @@ class CajTkWindow:
                     self.root.after(200, self.start_ocr)
 
     def _build(self) -> None:
-        pad = {"padx": 16, "pady": 6}
-        outer = ttk.Frame(self.root, padding=12)
+        colors = self._colors
+        outer = ttk.Frame(self.root, padding=(22, 18, 22, 16))
         outer.pack(fill=tk.BOTH, expand=True)
 
-        title = ttk.Label(outer, text=APP_TITLE, font=(_ui_font()[0], 18))
-        title.pack(anchor="w", **pad)
-        hint = ttk.Label(
+        header = ttk.Frame(outer)
+        header.pack(fill=tk.X, pady=(0, 12))
+        if self._header_icon is not None:
+            icon = ttk.Label(header, image=self._header_icon)
+            icon.pack(side=tk.LEFT, padx=(0, 12))
+        titles = ttk.Frame(header)
+        titles.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(titles, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            titles,
+            text="选文件，点一下，就能转成谁都能打开的 PDF",
+            style="Subtitle.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
+
+        self.drop_canvas = tk.Canvas(
             outer,
-            text=(
-                "选择知网下载的 CAJ，或 EPUB 电子书，点「开始转换」。\n"
-                "已经是图片版 PDF 时，点「识别图片 PDF」。\n"
-                "转换结果在原文件旁边；识别结果另存为「原名-已识别.pdf」，原来的 PDF 不会改。"
-            ),
-            justify="left",
+            height=96,
+            highlightthickness=0,
+            bd=0,
+            bg=colors["bg"],
+            cursor="hand2",
         )
-        hint.pack(anchor="w", padx=16, pady=(0, 8))
+        self.drop_canvas.pack(fill=tk.X, pady=(0, 12))
+        self.drop_canvas.bind("<Configure>", lambda _e: self._paint_drop())
+        self.drop_canvas.bind("<Enter>", self._on_drop_enter)
+        self.drop_canvas.bind("<Leave>", self._on_drop_leave)
+        self.drop_canvas.bind("<Button-1>", lambda _e: self._choose_files())
 
         buttons = ttk.Frame(outer)
-        buttons.pack(fill=tk.X, padx=16, pady=4)
-        self.btn_files = ttk.Button(buttons, text="选择文件", command=self._choose_files)
+        buttons.pack(fill=tk.X, pady=(0, 8))
+        self.btn_files = ttk.Button(buttons, text="选择文件", style="Accent.TButton", command=self._choose_files)
         self.btn_files.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_folder = ttk.Button(buttons, text="选择文件夹", command=self._choose_folder)
         self.btn_folder.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_clear = ttk.Button(buttons, text="清空列表", command=self.clear_jobs)
         self.btn_clear.pack(side=tk.LEFT)
 
-        list_frame = ttk.Frame(outer)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        ttk.Label(outer, text="文件列表", style="Heading.TLabel").pack(anchor="w", pady=(8, 4))
+
+        list_wrap = ttk.Frame(outer, style="Card.TFrame")
+        list_wrap.pack(fill=tk.BOTH, expand=True)
+        self.list_frame = list_wrap
         self.tree = ttk.Treeview(
-            list_frame,
+            list_wrap,
             columns=("status", "message"),
-            show="headings",
+            show="tree headings",
             selectmode="browse",
         )
-        self.tree.heading("status", text="状态")
-        self.tree.heading("message", text="说明")
-        self.tree.column("status", width=160, stretch=False)
-        self.tree.column("message", width=420, stretch=True)
-        scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.heading("#0", text="文件", anchor="w")
+        self.tree.heading("status", text="状态", anchor="w")
+        self.tree.heading("message", text="说明", anchor="w")
+        self.tree.column("#0", width=240, stretch=True)
+        self.tree.column("status", width=210, stretch=False)
+        self.tree.column("message", width=320, stretch=True)
+        scroll = ttk.Scrollbar(list_wrap, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.tree["show"] = "tree headings"
-        self.tree.heading("#0", text="文件")
-        self.tree.column("#0", width=220, stretch=True)
+        self.tree.tag_configure("ok", foreground=colors["success"])
+        self.tree.tag_configure("fail", foreground=colors["danger"])
+        self.tree.tag_configure("run", foreground=colors["accent"])
+        self.tree.tag_configure("wait", foreground=colors["muted"])
+        self.tree.tag_configure("skip", foreground=colors["warn"])
+        self.tree.tag_configure("odd", background=colors["stripe"])
+        self.empty = ttk.Label(
+            list_wrap,
+            text="还没有文件。点上面的蓝色按钮，或点虚线框选择。",
+            style="Muted.TLabel",
+            justify="center",
+        )
 
         action = ttk.Frame(outer)
-        action.pack(fill=tk.X, padx=16, pady=4)
-        self.btn_convert = ttk.Button(action, text="开始转换", command=self.start_convert)
+        action.pack(fill=tk.X, pady=(14, 6))
+        self.btn_convert = ttk.Button(action, text="开始转换", style="Accent.TButton", command=self.start_convert)
         self.btn_convert.pack(side=tk.LEFT)
         self.btn_ocr = ttk.Button(action, text="识别图片 PDF", command=self.start_ocr)
         self.btn_ocr.pack(side=tk.LEFT, padx=8)
@@ -141,20 +174,40 @@ class CajTkWindow:
         self.btn_open.pack(side=tk.LEFT, padx=8)
 
         self.progress = ttk.Progressbar(outer, mode="determinate")
-        self.progress.pack(fill=tk.X, padx=16, pady=(8, 4))
-        self.progress_text = ttk.Label(outer, text="准备就绪")
-        self.progress_text.pack(anchor="w", padx=16)
-        self.summary = ttk.Label(outer, text="", wraplength=700, justify="left")
-        self.summary.pack(anchor="w", padx=16, pady=(4, 8))
+        self.progress.pack(fill=tk.X, pady=(6, 4))
+        self.progress_text = ttk.Label(outer, text="准备就绪", style="Status.TLabel")
+        self.progress_text.pack(anchor="w")
+        self.summary = ttk.Label(outer, text="", style="Summary.TLabel", wraplength=760, justify="left")
+        self.summary.pack(anchor="w", pady=(6, 0))
         just = os.environ.get("CAJ2PDF_JUST_UPDATED", "").strip()
         if just:
             self.summary.configure(text=f"已自动更新到 {just}。")
 
-        try:
-            self.root.option_add("*Font", self._font)
-        except tk.TclError:
-            pass
+        self.root.bind("<Configure>", self._on_resize)
         self.btn_convert.state(["disabled"])
+        self._paint_drop()
+        self._show_empty(True)
+
+    def _on_resize(self, event) -> None:
+        if event.widget is self.root:
+            self.summary.configure(wraplength=max(event.width - 80, 360))
+
+    def _paint_drop(self) -> None:
+        draw_drop_card(self.drop_canvas, self._drop_hover, self._fonts, self._colors)
+
+    def _on_drop_enter(self, _event=None) -> None:
+        self._drop_hover = True
+        self._paint_drop()
+
+    def _on_drop_leave(self, _event=None) -> None:
+        self._drop_hover = False
+        self._paint_drop()
+
+    def _show_empty(self, show: bool) -> None:
+        if show:
+            self.empty.place(relx=0.5, rely=0.55, anchor="center")
+        else:
+            self.empty.place_forget()
 
     def _choose_files(self) -> None:
         paths = filedialog.askopenfilenames(title="选择要转换的 CAJ 或 EPUB 文件", filetypes=_filetypes())
@@ -241,17 +294,41 @@ class CajTkWindow:
         else:
             self.btn_convert.state(["disabled"])
 
+    def _row_tags(self, job: Job, index: int) -> tuple[str, ...]:
+        tags: list[str] = []
+        if job.ok is True and job.skipped:
+            tags.append("skip")
+        elif job.ok is True:
+            tags.append("ok")
+        elif job.ok is False:
+            tags.append("fail")
+        elif "正在" in job.status:
+            tags.append("run")
+        else:
+            tags.append("wait")
+        if index % 2 == 1:
+            tags.append("odd")
+        return tuple(tags)
+
     def refresh_list(self) -> None:
         self.tree.delete(*self.tree.get_children())
         if not self.jobs:
+            self._show_empty(True)
             self.btn_convert.state(["disabled"])
             return
-        for job in self.jobs:
+        self._show_empty(False)
+        for index, job in enumerate(self.jobs):
             status = job.status
             extras = [x for x in (job.format_name, KIND_LABELS.get(job.kind, "")) if x]
             if extras:
                 status = f"{status}  ·  " + "  ·  ".join(extras)
-            self.tree.insert("", tk.END, text=job.path.name, values=(status, job.message))
+            self.tree.insert(
+                "",
+                tk.END,
+                text=job.path.name,
+                values=(status, job.message),
+                tags=self._row_tags(job, index),
+            )
         if not self.busy:
             if any(job.task == "convert" for job in self.jobs):
                 self.btn_convert.state(["!disabled"])
@@ -422,4 +499,5 @@ class CajTkWindow:
 
 
 def run_tk(initial_files: list[Path], auto_start: bool) -> None:
+    enable_dpi()
     CajTkWindow(initial_files, auto_start).run()

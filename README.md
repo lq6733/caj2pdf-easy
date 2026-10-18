@@ -6,7 +6,7 @@ This is a desktop wrapper around [caj2pdf](https://github.com/caj2pdf/caj2pdf) f
 
 ## 功能
 
-- 图形界面：选文件、选文件夹、批量转换
+- 图形界面：选文件、选文件夹、批量转换。Windows / macOS 使用带图标的现代界面；Linux 使用 GTK
 - Linux 还支持拖放，以及文件管理器右键「转成 PDF」
 - 转换后的 PDF 保存在原文件旁边
 - 不需要知网客户端，也不需要一直联网（第一次安装 Python 组件时需要）

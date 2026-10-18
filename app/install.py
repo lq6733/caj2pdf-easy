@@ -48,6 +48,30 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n" if os.name != "nt" else "\r\n")
 
 
+def _ps_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _create_windows_shortcut(lnk: Path, target: str, workdir: str, icon: str, args: str = "") -> None:
+    command = (
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(%s); "
+        "$s.TargetPath = %s; "
+        "$s.WorkingDirectory = %s; "
+        "$s.WindowStyle = 7; "
+        "$s.IconLocation = %s; "
+        % (_ps_quote(str(lnk)), _ps_quote(target), _ps_quote(workdir), _ps_quote(icon))
+    )
+    if args:
+        command += "$s.Arguments = %s; " % _ps_quote(args)
+    command += "$s.Save()"
+    subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", command],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def _install_windows() -> list[str]:
     desktop = _desktop_dir()
     desktop.mkdir(parents=True, exist_ok=True)
@@ -64,13 +88,32 @@ def _install_windows() -> list[str]:
         )
         + "\n",
     )
-    notes = [f"桌面快捷方式：{bat}"]
+    notes = [f"桌面启动脚本：{bat}"]
+    try:
+        from app.icon import ICO_PATH, ensure_icons
+
+        ensure_icons()
+        icon = str(ICO_PATH) if ICO_PATH.is_file() else ""
+    except Exception:
+        icon = ""
+    lnk = desktop / "CAJ转PDF.lnk"
+    if icon:
+        try:
+            _create_windows_shortcut(lnk, str(bat), str(ROOT), icon)
+            notes.insert(0, f"桌面图标：{lnk}")
+        except Exception:
+            pass
     start_menu = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
     try:
         start_menu.mkdir(parents=True, exist_ok=True)
         menu_bat = start_menu / "CAJ转PDF.bat"
         shutil.copyfile(bat, menu_bat)
         notes.append(f"开始菜单：{menu_bat}")
+        if icon:
+            try:
+                _create_windows_shortcut(start_menu / "CAJ转PDF.lnk", str(bat), str(ROOT), icon)
+            except Exception:
+                pass
     except OSError:
         pass
     return notes
@@ -93,7 +136,59 @@ def _install_macos() -> list[str]:
     )
     _chmod_exec(command)
     _chmod_exec(ROOT / "开始转换.command")
-    return [f"桌面图标：{command}", "若系统提示无法打开，请右键该图标选择「打开」。"]
+    notes = [f"桌面脚本：{command}", "若系统提示无法打开，请右键该图标选择「打开」。"]
+    app = desktop / "CAJ转PDF.app"
+    try:
+        from app import __version__
+        from app.icon import ICNS_PATH, ensure_icons
+
+        ensure_icons()
+        macos = app / "Contents" / "MacOS"
+        resources = app / "Contents" / "Resources"
+        macos.mkdir(parents=True, exist_ok=True)
+        resources.mkdir(parents=True, exist_ok=True)
+        launcher = macos / "CAJ转PDF"
+        _write(
+            launcher,
+            "\n".join(
+                [
+                    "#!/bin/bash",
+                    'export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"',
+                    f'cd "{ROOT}"',
+                    'exec "' + str(ROOT / "开始转换.command") + '" "$@"',
+                    "",
+                ]
+            ),
+        )
+        _chmod_exec(launcher)
+        if ICNS_PATH.is_file():
+            shutil.copyfile(ICNS_PATH, resources / "caj2pdf-easy.icns")
+        plist = app / "Contents" / "Info.plist"
+        plist.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>CAJ 转 PDF</string>
+  <key>CFBundleDisplayName</key><string>CAJ 转 PDF</string>
+  <key>CFBundleIdentifier</key><string>io.github.caj2pdf.easy</string>
+  <key>CFBundleVersion</key><string>%s</string>
+  <key>CFBundleShortVersionString</key><string>%s</string>
+  <key>CFBundleExecutable</key><string>CAJ转PDF</string>
+  <key>CFBundleIconFile</key><string>caj2pdf-easy</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSMinimumSystemVersion</key><string>10.13</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+"""
+            % (__version__, __version__),
+            encoding="utf-8",
+        )
+        notes.insert(0, f"桌面图标：{app}")
+    except Exception as exc:
+        notes.append(f"未能创建带图标的应用（可用桌面脚本）：{exc}")
+    return notes
 
 
 def _install_linux() -> list[str]:
